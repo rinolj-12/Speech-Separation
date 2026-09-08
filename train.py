@@ -28,9 +28,8 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 
 from config import ModelConfig, TrainConfig
-from compat import amp_autocast, make_grad_scaler
 from model import SpikingConvTasNet, build_model
-from losses import NegSISDRLoss, PITLossWrapper, CombinedPITLoss
+from losses import NegSISDRLoss, PITLossWrapper, CombinedPITLoss, calculate_sisdr
 from dataset import get_dataloaders
 
 
@@ -71,6 +70,7 @@ def train_one_epoch(
     model.train()
     total_loss = 0.0
     total_sisdr = 0.0
+    total_sisdr_i = 0.0
     total_batches = len(train_loader) if max_batches is None else min(len(train_loader), max_batches)
     amp_enabled = use_amp and (device.type == "cuda")
 
@@ -88,9 +88,9 @@ def train_one_epoch(
         target_batch = target_batch.to(device, non_blocking=True)
 
         # Forward pass under AMP Autocast
-        with amp_autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+        with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
             separated = model(mix_batch)
-            loss, _, sisdr_score = criterion(separated, target_batch)
+            loss, best_estimates, sisdr_score = criterion(separated, target_batch)
             # Scale loss for gradient accumulation
             loss_scaled = loss / grad_accum_steps
 
@@ -112,8 +112,19 @@ def train_one_epoch(
                 optimizer.step()
                 optimizer.zero_grad()
 
+        # SI-SDRi = SI-SDR(estimate, source) - SI-SDR(mixture, source)
+        # Compute mixture baseline SI-SDR (mixture repeated vs each target source)
+        with torch.no_grad():
+            mix_repeated = mix_batch.expand_as(target_batch)  # [B, K, T]
+            mixture_sisdr = calculate_sisdr(
+                mix_repeated.reshape(-1, mix_repeated.shape[-1]).float(),
+                target_batch.reshape(-1, target_batch.shape[-1]).float(),
+            ).mean()
+            sisdr_i = sisdr_score - mixture_sisdr
+
         total_loss += loss.item()
         total_sisdr += sisdr_score.item()
+        total_sisdr_i += sisdr_i.item()
 
         if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == total_batches:
             elapsed = time.time() - start_time
@@ -128,13 +139,14 @@ def train_one_epoch(
                 f"  Epoch [{epoch:02d}/{total_epochs:02d}] | "
                 f"Batch [{batch_idx+1:03d}/{total_batches:03d}] | "
                 f"Loss: {loss.item():6.2f} | "
-                f"Train SI-SDR: {sisdr_score.item():6.2f} dB | "
+                f"SI-SDR: {sisdr_score.item():6.2f} dB | "
+                f"SI-SDRi: {sisdr_i.item():6.2f} dB | "
                 f"Speed: {samples_per_sec:.1f} samples/s"
                 f"{gpu_mem_str}",
                 flush=True,
             )
 
-    return total_sisdr / max(total_batches, 1)
+    return total_sisdr / max(total_batches, 1), total_sisdr_i / max(total_batches, 1)
 
 
 def validate(
@@ -157,7 +169,7 @@ def validate(
             mix_batch = mix_batch.to(device, non_blocking=True)
             target_batch = target_batch.to(device, non_blocking=True)
 
-            with amp_autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+            with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
                 separated = model(mix_batch)
                 _, _, sisdr_score = criterion(separated, target_batch)
             val_sisdr_list.append(sisdr_score.item())
@@ -166,7 +178,6 @@ def validate(
 
 
 def main():
-    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     parser = argparse.ArgumentParser(description="Train SNN Conv-TasNet on MiniLibriMix with NVIDIA CUDA & AMP")
     parser.add_argument(
         "--encoder_type",
@@ -414,7 +425,8 @@ def main():
         scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.min_lr)
     else:
         scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=args.patience, min_lr=args.min_lr)
-    scaler = make_grad_scaler(device.type, enabled=args.use_amp and (device.type == "cuda"))
+    scaler = torch.amp.GradScaler(device.type, enabled=args.use_amp and (device.type == "cuda")) \
+        if (args.use_amp and device.type == "cuda") else None
 
     checkpoint_name = f"best_snn_{args.encoder_type}_{args.neuron_type}.pt"
     checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_name)
@@ -426,7 +438,7 @@ def main():
         epoch_start = time.time()
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
 
-        train_sisdr = train_one_epoch(
+        train_sisdr, train_sisdr_i = train_one_epoch(
             model=model,
             train_loader=train_loader,
             criterion=criterion,
@@ -459,7 +471,7 @@ def main():
 
         print(
             f"Epoch {epoch:02d} Summary [{epoch_time:.1f}s] | "
-            f"Train SI-SDR: {train_sisdr:6.2f} dB | "
+            f"Train SI-SDR: {train_sisdr:6.2f} dB | Train SI-SDRi: {train_sisdr_i:6.2f} dB | "
             f"Val SI-SDR: {val_sisdr:6.2f} dB | "
             f"LR: {current_lr:.6f}",
             flush=True,

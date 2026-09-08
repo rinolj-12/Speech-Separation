@@ -9,9 +9,14 @@ Implements:
    - ALIFNeuron: Adaptive LIF with spike-frequency threshold adaptation.
    - APLIFNeuron: Combined Adaptive Parametric LIF.
    - FSNeuron: Few-Spike / Multi-Threshold Bit-Plane Neuron.
-3. Normalization Layers:
-   - TemporalLayerNorm / ThresholdDependentBatchNorm1d (tdBN).
-4. SpikingConvBlock1d: Dilated 1-D Depthwise-Separable Spiking Convolution Block.
+3. SpikingConvBlock1d: Dilated 1-D Depthwise-Separable Spiking Convolution Block.
+
+Note on reset detach:
+    The spike tensor from the previous step is DETACHED before it is used in the
+    subtract-reset equation:  u[t] = β·u[t-1] - s[t-1].detach()·V_th + (1-β)·I[t]
+    This is the standard BPTT-through-surrogates formulation (also used by snntorch
+    and SpikingJelly). Without detach(), gradients fold back through the previous
+    step's spike decision, causing gradient instability.
 """
 
 import math
@@ -194,10 +199,11 @@ class LIFNeuron(nn.Module):
         s: torch.Tensor,
         step_idx: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        s_d = s.detach()  # Detach reset spike — gradient flows only through threshold crossing
         if self.reset_mechanism == "zero":
-            u_decayed = self.beta * u * (1.0 - s) + (1.0 - self.beta) * input_current
+            u_decayed = self.beta * u * (1.0 - s_d) + (1.0 - self.beta) * input_current
         else:
-            u_decayed = self.beta * u - s * self.threshold + (1.0 - self.beta) * input_current
+            u_decayed = self.beta * u - s_d * self.threshold + (1.0 - self.beta) * input_current
 
         s_new = self.spike_fn(u_decayed, self.threshold)
         return s_new, u_decayed
@@ -252,11 +258,12 @@ class PLIFNeuron(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         beta = self.beta
         v_th = self.threshold
+        s_d = s.detach()  # Detach reset spike — gradient flows only through threshold crossing
 
         if self.reset_mechanism == "zero":
-            u_decayed = beta * u * (1.0 - s) + (1.0 - beta) * input_current
+            u_decayed = beta * u * (1.0 - s_d) + (1.0 - beta) * input_current
         else:
-            u_decayed = beta * u - s * v_th + (1.0 - beta) * input_current
+            u_decayed = beta * u - s_d * v_th + (1.0 - beta) * input_current
 
         s_new = self.spike_fn(u_decayed, v_th)
         return s_new, u_decayed
@@ -306,13 +313,14 @@ class ALIFNeuron(nn.Module):
         if a is None:
             a = torch.zeros_like(u)
 
-        a_new = self.rho * a + s
+        s_d = s.detach()  # Detach reset spike — gradient flows only through threshold crossing
+        a_new = self.rho * a + s_d
         v_th = self.base_threshold + self.beta_ada * a_new
 
         if self.reset_mechanism == "zero":
-            u_decayed = self.beta * u * (1.0 - s) + (1.0 - self.beta) * input_current
+            u_decayed = self.beta * u * (1.0 - s_d) + (1.0 - self.beta) * input_current
         else:
-            u_decayed = self.beta * u - s * v_th + (1.0 - self.beta) * input_current
+            u_decayed = self.beta * u - s_d * v_th + (1.0 - self.beta) * input_current
 
         s_new = self.spike_fn(u_decayed, v_th)
         return s_new, u_decayed, a_new
@@ -376,14 +384,15 @@ class APLIFNeuron(nn.Module):
         if a is None:
             a = torch.zeros_like(u)
 
-        a_new = self.rho * a + s
+        s_d = s.detach()  # Detach reset spike — gradient flows only through threshold crossing
+        a_new = self.rho * a + s_d
         v_th = self.base_threshold + self.beta_ada * a_new
         beta = self.beta
 
         if self.reset_mechanism == "zero":
-            u_decayed = beta * u * (1.0 - s) + (1.0 - beta) * input_current
+            u_decayed = beta * u * (1.0 - s_d) + (1.0 - beta) * input_current
         else:
-            u_decayed = beta * u - s * v_th + (1.0 - beta) * input_current
+            u_decayed = beta * u - s_d * v_th + (1.0 - beta) * input_current
 
         s_new = self.spike_fn(u_decayed, v_th)
         return s_new, u_decayed, a_new
@@ -493,42 +502,7 @@ def get_neuron(
 
 
 # ==============================================================================
-# 3. Normalization Layers for SNNs
-# ==============================================================================
-
-class ThresholdDependentBatchNorm1d(nn.Module):
-    """
-    Threshold-Dependent Batch Normalization (tdBN) for 1D SNN feature maps.
-    Normalizes temporal sequences [S, B, C, L] with threshold scaling alpha * V_th.
-    """
-
-    def __init__(self, num_features: int, eps: float = 1e-5, alpha: float = 1.0, v_th: float = 0.8):
-        super().__init__()
-        self.num_features = num_features
-        self.eps = eps
-        self.alpha = alpha
-        self.v_th = v_th
-        self.weight = nn.Parameter(torch.ones(1, 1, num_features, 1))
-        self.bias = nn.Parameter(torch.zeros(1, 1, num_features, 1))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 4:
-            s_steps, batch, chans, l_len = x.shape
-            mean = x.mean(dim=(0, 1, 3), keepdim=True)
-            var = x.var(dim=(0, 1, 3), keepdim=True, unbiased=False)
-            x_norm = (x - mean) / torch.sqrt(var + self.eps)
-            out = self.weight * x_norm * (self.alpha * self.v_th) + self.bias
-            return out
-        else:
-            mean = x.mean(dim=(0, 2), keepdim=True)
-            var = x.var(dim=(0, 2), keepdim=True, unbiased=False)
-            x_norm = (x - mean) / torch.sqrt(var + self.eps)
-            out = self.weight.squeeze(0) * x_norm * (self.alpha * self.v_th) + self.bias.squeeze(0)
-            return out
-
-
-# ==============================================================================
-# 4. Spiking Dilated 1-D Convolution Block
+# 3. Spiking Dilated 1-D Convolution Block
 # ==============================================================================
 
 class SpikingConvBlock1d(nn.Module):
@@ -602,6 +576,8 @@ class SpikingConvBlock1d(nn.Module):
         # 1x1 Pointwise conv projection: [H -> B_conv]
         self.conv1x1_res = nn.Conv1d(hidden_channels, in_channels, kernel_size=1, bias=False)
         self.conv1x1_skip = nn.Conv1d(hidden_channels, in_channels, kernel_size=1, bias=False)
+        # Separate projection for membrane readout — must NOT share weights with conv1x1_skip
+        self.conv1x1_mem = nn.Conv1d(hidden_channels, in_channels, kernel_size=1, bias=False)
         self.norm = nn.GroupNorm(1, in_channels, eps=1e-8)
 
     def forward(
@@ -674,7 +650,8 @@ class SpikingConvBlock1d(nn.Module):
 
         if self.return_membrane:
             flat_u2 = u2_raw_seq.view(s_steps * batch, self.hidden_channels, l_len)
-            flat_u_proj = self.conv1x1_skip(flat_u2)
+            # Use dedicated membrane projection (conv1x1_mem), not the skip connection weights
+            flat_u_proj = self.conv1x1_mem(flat_u2)
             u_seq = flat_u_proj.view(s_steps, batch, in_c, l_len)
         else:
             u_seq = None

@@ -51,7 +51,7 @@ def calculate_sisdr(
     s_target_energy = torch.sum(s_target ** 2, dim=-1) + eps
     e_noise_energy = torch.sum(e_noise ** 2, dim=-1) + eps
 
-    ratio = torch.clamp(s_target_energy / e_noise_energy, min=eps)
+    ratio = s_target_energy / e_noise_energy  # both already have +eps; no clamp needed
     sisdr = 10.0 * torch.log10(ratio)
     return sisdr
 
@@ -185,11 +185,16 @@ class PITLossWrapper(nn.Module):
         stacked_perm_losses = torch.stack(perm_losses, dim=0)
         min_losses, best_perm_indices = torch.min(stacked_perm_losses, dim=0)
 
-        best_estimates = torch.zeros_like(estimates)
-        for b in range(batch_size):
-            best_perm = self.permutations[best_perm_indices[b]]
-            for tgt_idx, est_idx in enumerate(best_perm):
-                best_estimates[b, tgt_idx, :] = estimates[b, est_idx, :]
+        # Vectorized permutation reordering via torch.gather (no Python batch loop)
+        perm_tensor = torch.tensor(
+            self.permutations, dtype=torch.long, device=estimates.device
+        )  # [P, K]
+        best_perm_idx = perm_tensor[best_perm_indices]  # [B, K]
+        best_estimates = torch.gather(
+            estimates,
+            dim=1,
+            index=best_perm_idx.unsqueeze(-1).expand(-1, -1, estimates.shape[-1]),
+        )
 
         sisdr_scores = -min_losses.mean()
         total_loss = min_losses.mean()
@@ -246,12 +251,16 @@ class CombinedPITLoss(nn.Module):
         stacked = torch.stack(perm_losses, dim=0)
         min_sisdr_losses, best_perm_indices = torch.min(stacked, dim=0)
 
-        # Step 3: Align estimates to targets according to winning permutation
-        best_estimates = torch.zeros_like(estimates)
-        for b in range(batch_size):
-            best_perm = self.permutations[best_perm_indices[b]]
-            for tgt_idx, est_idx in enumerate(best_perm):
-                best_estimates[b, tgt_idx, :] = estimates[b, est_idx, :]
+        # Vectorized permutation reordering via torch.gather (no Python batch loop)
+        perm_tensor = torch.tensor(
+            self.permutations, dtype=torch.long, device=estimates.device
+        )  # [P, K]
+        best_perm_idx = perm_tensor[best_perm_indices]  # [B, K]
+        best_estimates = torch.gather(
+            estimates,
+            dim=1,
+            index=best_perm_idx.unsqueeze(-1).expand(-1, -1, estimates.shape[-1]),
+        )
 
         # Step 4: Evaluate expensive Multi-Resolution STFT ONLY on the aligned predictions
         if self.mr_stft_weight > 0:

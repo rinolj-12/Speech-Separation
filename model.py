@@ -5,13 +5,17 @@ SpikingConvTasNet (SNN-based Separator with PLIF/ALIF/FS-Neuron, Bit-Plane/Popul
 
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Literal
 
 from config import ModelConfig
 from encoder import ConvTasNetEncoder, SpectrogramEncoder
 from decoder import ConvTasNetDecoder, SpectrogramDecoder
 from spike_encoder import SpikeEncoder
 from separator import SpikingTCNSeparator
+
+# Valid encoder type identifiers
+EncoderType = Literal["standard", "spectrogram", "stft"]
+_SPECTROGRAM_ENCODERS = frozenset({"spectrogram", "stft"})
 
 
 # ==============================================================================
@@ -43,9 +47,9 @@ class SpikingConvTasNet(nn.Module):
         self.config = config
 
         # 1. Encoder and Decoder initialization based on encoder_type
-        self.encoder_type = getattr(config, "encoder_type", "standard").lower()
+        self.encoder_type: str = getattr(config, "encoder_type", "standard").lower()
 
-        if self.encoder_type in ["spectrogram", "stft"]:
+        if self.encoder_type in _SPECTROGRAM_ENCODERS:
             self.encoder = SpectrogramEncoder(
                 n_fft=config.stft_n_fft,
                 hop_length=config.stft_hop_length,
@@ -145,7 +149,7 @@ class SpikingConvTasNet(nn.Module):
             print(f"1. Input Mixture Waveform      : {x.shape} (B={batch}, Time={orig_time})")
 
         # Step 1 & 2: Encode mixture into Spikes and Latent representation
-        if self.encoder_type in ["spectrogram", "stft"]:
+        if self.encoder_type in _SPECTROGRAM_ENCODERS:
             w, phase = self.encoder(x, verbose=verbose)
             spike_seq = self.spike_encoder(w, verbose=verbose)
         else:
@@ -170,7 +174,7 @@ class SpikingConvTasNet(nn.Module):
             print(f"5. Masked Latent Representations: {w_masked.shape}")
 
         # Step 5: Decode masked latent features into separated waveforms
-        if self.encoder_type in ["spectrogram", "stft"]:
+        if self.encoder_type in _SPECTROGRAM_ENCODERS:
             separated_waveforms = self.decoder(w_masked, phase=phase, target_length=orig_time, verbose=verbose)
         else:
             separated_waveforms = self.decoder(w_masked, target_length=orig_time, verbose=verbose)
