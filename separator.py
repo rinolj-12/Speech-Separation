@@ -163,9 +163,9 @@ class SpikingTCNSeparator(nn.Module):
             else:
                 current_res, skip, u_block = block(current_res)
 
-            skip_total.add_(skip)
+            skip_total = skip_total + skip
             if u_total is not None and u_block is not None:
-                u_total.add_(u_block)
+                u_total = u_total + u_block
 
         total_features = skip_total + current_res
 

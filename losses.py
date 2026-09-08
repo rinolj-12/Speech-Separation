@@ -169,10 +169,13 @@ class PITLossWrapper(nn.Module):
         batch_size, num_sources, time_len = estimates.shape
         assert num_sources == self.num_sources, f"Expected {self.num_sources} sources, got {num_sources}"
 
-        pairwise_losses = torch.zeros(batch_size, num_sources, num_sources, device=estimates.device)
+        pair_rows = []
         for i in range(num_sources):
+            pair_cols = []
             for j in range(num_sources):
-                pairwise_losses[:, i, j] = self.loss_fn(estimates[:, i, :], targets[:, j, :])
+                pair_cols.append(self.loss_fn(estimates[:, i, :], targets[:, j, :]))
+            pair_rows.append(torch.stack(pair_cols, dim=1))
+        pairwise_losses = torch.stack(pair_rows, dim=1)  # [B, num_sources, num_sources]
 
         perm_losses = []
         for perm in self.permutations:

@@ -36,15 +36,19 @@ from dataset import get_dataloaders
 
 def resolve_device(device_arg: str) -> torch.device:
     """Resolves device string to a valid torch.device with CUDA fallback."""
-    if device_arg == "auto":
+    if device_arg in ["auto", "cuda"]:
         if torch.cuda.is_available():
-            return torch.device("cuda:0")
+            dev = torch.device("cuda:0")
+            torch.cuda.set_device(dev)
+            return dev
         return torch.device("cpu")
     elif device_arg.startswith("cuda"):
         if not torch.cuda.is_available():
             print("[Warning] CUDA requested but not available. Falling back to CPU.")
             return torch.device("cpu")
-        return torch.device(device_arg)
+        dev = torch.device(device_arg)
+        torch.cuda.set_device(dev)
+        return dev
     else:
         return torch.device("cpu")
 
@@ -215,8 +219,9 @@ def main():
     parser.add_argument("--device", type=str, default="cuda", help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
     parser.add_argument("--amp", dest="use_amp", action="store_true", default=True, help="Enable PyTorch FP16 Automatic Mixed Precision")
     parser.add_argument("--no_amp", dest="use_amp", action="store_false", help="Disable PyTorch AMP (use standard FP32)")
-    parser.add_argument("--checkpointing", dest="use_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (saves ~80% activation VRAM)")
+    parser.add_argument("--checkpointing", dest="use_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (saves ~80%% activation VRAM)")
     parser.add_argument("--no_checkpointing", dest="use_checkpointing", action="store_false", help="Disable gradient checkpointing")
+    parser.add_argument("--multi_gpu", dest="multi_gpu", action="store_true", default=False, help="Enable DataParallel across multiple GPUs (experimental; single-GPU is recommended)")
     parser.add_argument("--mask_activation", type=str, default="sigmoid", choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
     parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment duration in seconds")
     parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
@@ -376,14 +381,22 @@ def main():
     # Initialize Model (AFTER DataLoaders — keeps CUDA uninit'd during fork)
     model = SpikingConvTasNet(model_config)
 
-    # Multi-GPU support (e.g., 2x Tesla T4)
+    # Device & Multi-GPU Configuration (Single-GPU is recommended for stability)
     num_gpus = torch.cuda.device_count() if device.type == "cuda" else 0
-    is_multi_gpu = num_gpus > 1
+    is_multi_gpu = args.multi_gpu and (num_gpus > 1)
     if is_multi_gpu:
         print(f"- Multi-GPU:       Active ({num_gpus} GPUs detected: {[torch.cuda.get_device_name(i) for i in range(num_gpus)]})")
+        if args.use_checkpointing:
+            print("[Warning] nn.DataParallel is incompatible with activation checkpointing on systems without NVLink/P2P.")
+            print("          Disabling gradient checkpointing to prevent CUDA illegal memory access.")
+            model_config.use_checkpointing = False
+            model = SpikingConvTasNet(model_config)
         model = nn.DataParallel(model)
     elif device.type == "cuda":
-        print(f"- Multi-GPU:       Single GPU ({gpu_name})")
+        gpu_detail = f"{gpu_name} (device: {device})"
+        if num_gpus > 1:
+            gpu_detail += f" [Single-GPU mode active; {num_gpus} total GPUs available]"
+        print(f"- Accelerator:     Single GPU ({gpu_detail})")
 
     model.to(device)
     raw_model = model.module if is_multi_gpu else model

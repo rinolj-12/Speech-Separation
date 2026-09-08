@@ -48,22 +48,30 @@ class FastSigmoidSurrogate(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, mem: torch.Tensor, threshold: Union[float, torch.Tensor] = 1.0, slope: float = 10.0):
-        ctx.save_for_backward(mem)
-        ctx.threshold = threshold if isinstance(threshold, torch.Tensor) else torch.tensor(threshold, device=mem.device)
+        thresh_is_tensor = isinstance(threshold, torch.Tensor)
+        if thresh_is_tensor:
+            ctx.save_for_backward(mem, threshold)
+        else:
+            ctx.save_for_backward(mem)
+        ctx.thresh_is_tensor = thresh_is_tensor
+        ctx.threshold_val = float(threshold) if not thresh_is_tensor else 0.0
         ctx.slope = slope
-        spike = (mem >= threshold).float()
+        spike = (mem >= threshold).to(mem.dtype)
         return spike
 
     @staticmethod
     def backward(ctx, grad_output):
-        mem, = ctx.saved_tensors
-        threshold = ctx.threshold
+        if ctx.thresh_is_tensor:
+            mem, threshold = ctx.saved_tensors
+        else:
+            mem, = ctx.saved_tensors
+            threshold = ctx.threshold_val
         slope = ctx.slope
         
         diff = torch.abs(mem - threshold)
-        grad_input = grad_output / (1.0 + slope * diff) ** 2
+        grad_input = (grad_output / (1.0 + slope * diff) ** 2).to(mem.dtype)
         grad_thresh = None
-        if ctx.needs_input_grad[1] and isinstance(threshold, torch.Tensor):
+        if ctx.needs_input_grad[1] and ctx.thresh_is_tensor:
             grad_thresh = _reduce_grad(-grad_input, threshold)
         return grad_input, grad_thresh, None
 
@@ -76,22 +84,30 @@ class ATanSurrogate(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, mem: torch.Tensor, threshold: Union[float, torch.Tensor] = 1.0, alpha: float = 2.0):
-        ctx.save_for_backward(mem)
-        ctx.threshold = threshold if isinstance(threshold, torch.Tensor) else torch.tensor(threshold, device=mem.device)
+        thresh_is_tensor = isinstance(threshold, torch.Tensor)
+        if thresh_is_tensor:
+            ctx.save_for_backward(mem, threshold)
+        else:
+            ctx.save_for_backward(mem)
+        ctx.thresh_is_tensor = thresh_is_tensor
+        ctx.threshold_val = float(threshold) if not thresh_is_tensor else 0.0
         ctx.alpha = alpha
-        spike = (mem >= threshold).float()
+        spike = (mem >= threshold).to(mem.dtype)
         return spike
 
     @staticmethod
     def backward(ctx, grad_output):
-        mem, = ctx.saved_tensors
-        threshold = ctx.threshold
+        if ctx.thresh_is_tensor:
+            mem, threshold = ctx.saved_tensors
+        else:
+            mem, = ctx.saved_tensors
+            threshold = ctx.threshold_val
         alpha = ctx.alpha
         
         delta = mem - threshold
-        grad_input = grad_output * (alpha / 2.0) / (1.0 + (math.pi / 2.0 * alpha * delta) ** 2)
+        grad_input = (grad_output * (alpha / 2.0) / (1.0 + (math.pi / 2.0 * alpha * delta) ** 2)).to(mem.dtype)
         grad_thresh = None
-        if ctx.needs_input_grad[1] and isinstance(threshold, torch.Tensor):
+        if ctx.needs_input_grad[1] and ctx.thresh_is_tensor:
             grad_thresh = _reduce_grad(-grad_input, threshold)
         return grad_input, grad_thresh, None
 
@@ -102,25 +118,34 @@ class PiecewiseQuadraticSurrogate(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, mem: torch.Tensor, threshold: Union[float, torch.Tensor] = 1.0, width: float = 1.0):
-        ctx.save_for_backward(mem)
-        ctx.threshold = threshold if isinstance(threshold, torch.Tensor) else torch.tensor(threshold, device=mem.device)
+        thresh_is_tensor = isinstance(threshold, torch.Tensor)
+        if thresh_is_tensor:
+            ctx.save_for_backward(mem, threshold)
+        else:
+            ctx.save_for_backward(mem)
+        ctx.thresh_is_tensor = thresh_is_tensor
+        ctx.threshold_val = float(threshold) if not thresh_is_tensor else 0.0
         ctx.width = width
-        spike = (mem >= threshold).float()
+        spike = (mem >= threshold).to(mem.dtype)
         return spike
 
     @staticmethod
     def backward(ctx, grad_output):
-        mem, = ctx.saved_tensors
-        threshold = ctx.threshold
+        if ctx.thresh_is_tensor:
+            mem, threshold = ctx.saved_tensors
+        else:
+            mem, = ctx.saved_tensors
+            threshold = ctx.threshold_val
         width = ctx.width
         
         diff = mem - threshold
-        mask = (torch.abs(diff) <= width).float()
-        grad_input = grad_output * mask * (width - torch.abs(diff)) / (width ** 2)
+        mask = (torch.abs(diff) <= width).to(mem.dtype)
+        grad_input = (grad_output * mask * (width - torch.abs(diff)) / (width ** 2)).to(mem.dtype)
         grad_thresh = None
-        if ctx.needs_input_grad[1] and isinstance(threshold, torch.Tensor):
+        if ctx.needs_input_grad[1] and ctx.thresh_is_tensor:
             grad_thresh = _reduce_grad(-grad_input, threshold)
         return grad_input, grad_thresh, None
+
 
 
 def get_surrogate_fn(surrogate_type: str = "fast_sigmoid"):
