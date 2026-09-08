@@ -330,8 +330,18 @@ def main():
     # Initialize Model
     model = SpikingConvTasNet(model_config)
 
+    # Multi-GPU support (e.g., 2x Tesla T4)
+    num_gpus = torch.cuda.device_count() if device.type == "cuda" else 0
+    is_multi_gpu = num_gpus > 1
+    if is_multi_gpu:
+        print(f"- Multi-GPU:       Active ({num_gpus} GPUs detected: {[torch.cuda.get_device_name(i) for i in range(num_gpus)]})")
+        model = nn.DataParallel(model)
+    elif device.type == "cuda":
+        print(f"- Multi-GPU:       Single GPU ({gpu_name})")
+
     model.to(device)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    raw_model = model.module if is_multi_gpu else model
+    total_params = sum(p.numel() for p in raw_model.parameters() if p.requires_grad)
     print(f"- Trainable Params:{total_params:,}")
 
     # DataLoaders
@@ -419,7 +429,7 @@ def main():
             checkpoint_data = {
                 "epoch": epoch,
                 "model_type": "snn",
-                "model_state_dict": model.state_dict(),
+                "model_state_dict": raw_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "model_config": model_config,
                 "val_sisdr": val_sisdr,
