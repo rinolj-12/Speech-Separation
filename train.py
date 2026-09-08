@@ -157,6 +157,7 @@ def validate(
 
 
 def main():
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     parser = argparse.ArgumentParser(description="Train SNN Conv-TasNet on MiniLibriMix with NVIDIA CUDA & AMP")
     parser.add_argument(
         "--encoder_type",
@@ -212,8 +213,8 @@ def main():
     parser.add_argument("--mask_activation", type=str, default="sigmoid", choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
     parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment duration in seconds")
     parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
-    parser.add_argument("--batch_size", type=int, default=8, help="Training batch size (default: 8)")
-    parser.add_argument("--grad_accum_steps", type=int, default=2, help="Gradient accumulation steps (default: 2)")
+    parser.add_argument("--batch_size", type=int, default=4, help="Training batch size (default: 4)")
+    parser.add_argument("--grad_accum_steps", type=int, default=4, help="Gradient accumulation steps (default: 4)")
     parser.add_argument("--train_samples_per_epoch", type=int, default=2000, help="Virtual samples per epoch with random cropping (default: 2000)")
     parser.add_argument("--lr", type=float, default=1.5e-3, help="Learning rate for Adam optimizer")
     parser.add_argument("--lr_scheduler", type=str, default="cosine", choices=["cosine", "plateau"], help="Learning rate scheduler ('cosine' or 'plateau')")
@@ -223,7 +224,7 @@ def main():
     parser.add_argument("--snn_timesteps", type=int, default=6, help="SNN simulation timesteps S (default: 6)")
     parser.add_argument("--snn_beta", type=float, default=0.9, help="LIF membrane potential decay factor")
     parser.add_argument("--surrogate", type=str, default="fast_sigmoid", choices=["fast_sigmoid", "atan", "piecewise"], help="Surrogate gradient function")
-    parser.add_argument("--num_repeats", type=int, default=3, help="Number of dilation stack repeats R (default: 3)")
+    parser.add_argument("--num_repeats", type=int, default=2, help="Number of dilation stack repeats R (default: 2)")
     parser.add_argument("--bottleneck_channels", type=int, default=128, help="Number of bottleneck channels B (default: 128)")
     parser.add_argument("--hidden_channels", type=int, default=256, help="Number of hidden channels H in depthwise blocks (default: 256)")
     parser.add_argument("--data_dir", type=str, default="./data/MiniLibriMix", help="Path to MiniLibriMix dataset")
