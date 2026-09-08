@@ -449,4 +449,10 @@ def main():
 
 
 if __name__ == "__main__":
+    import torch.multiprocessing as mp
+    try:
+        if mp.get_start_method(allow_none=True) is None:
+            mp.set_start_method("spawn")
+    except RuntimeError:
+        pass
     main()
