@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.env
+.venv/
+venv311/
+
+# Large Datasets, Checkpoints & Outputs
+data/
+checkpoints/
+test_outputs/
+.dist/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS / Linux temp files
+.DS_Store
+*.tmp
+*.bak
+*~
+
+# Archives
+*.zip
+*.tar.gz
+*.tgz
