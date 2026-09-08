@@ -327,7 +327,44 @@ def main():
         hidden_channels=args.hidden_channels,
     )
 
-    # Initialize Model
+    # --- DataLoaders FIRST (before model.to(device)) ---
+    # IMPORTANT: DataLoader workers are forked from the current process. If CUDA
+    # is initialized (e.g. via model.to('cuda')) before fork(), the forked worker
+    # processes inherit a corrupt CUDA context and crash with SIGSEGV in
+    # libtorch_python.so. Creating DataLoaders before touching CUDA avoids this.
+    #
+    # Additionally, when running inside Docker/Kaggle containers, /dev/shm is
+    # often very small (64 MB), causing pin_memory IPC to OOM in workers.
+    # We auto-detect this and force num_workers=0 + pin_memory=False.
+    safe_num_workers = args.num_workers
+    pin_mem = args.pin_memory if args.pin_memory is not None else (device.type == "cuda")
+    if device.type == "cuda" and safe_num_workers > 0:
+        try:
+            import shutil
+            shm_free_mb = shutil.disk_usage("/dev/shm").free / (1024 ** 2)
+            if shm_free_mb < 512:
+                print(f"[Warning] /dev/shm has only {shm_free_mb:.0f} MB free (< 512 MB). "
+                      f"Forcing num_workers=0 and pin_memory=False to prevent DataLoader worker SIGSEGV.")
+                safe_num_workers = 0
+                pin_mem = False
+        except OSError:
+            pass  # /dev/shm doesn't exist on this platform — leave as-is
+
+    print(f"\n[1/3] Loading MiniLibriMix dataset from: {args.data_dir} ...")
+    train_loader, val_loader = get_dataloaders(
+        dataset_type="mini_librimix",
+        sample_rate=model_config.sample_rate,
+        segment_length=model_config.segment_length,
+        batch_size=args.batch_size,
+        data_dir=args.data_dir,
+        num_workers=safe_num_workers,
+        pin_memory=pin_mem,
+        train_samples_per_epoch=args.train_samples_per_epoch,
+    )
+    print(f"  - Train: {len(train_loader.dataset)} samples across {len(train_loader)} batches (pin_memory={pin_mem}, num_workers={safe_num_workers})")
+    print(f"  - Val:   {len(val_loader.dataset)} samples across {len(val_loader)} batches")
+
+    # Initialize Model (AFTER DataLoaders — keeps CUDA uninit'd during fork)
     model = SpikingConvTasNet(model_config)
 
     # Multi-GPU support (e.g., 2x Tesla T4)
@@ -343,22 +380,6 @@ def main():
     raw_model = model.module if is_multi_gpu else model
     total_params = sum(p.numel() for p in raw_model.parameters() if p.requires_grad)
     print(f"- Trainable Params:{total_params:,}")
-
-    # DataLoaders
-    pin_mem = args.pin_memory if args.pin_memory is not None else (device.type == "cuda")
-    print(f"\n[1/3] Loading MiniLibriMix dataset from: {args.data_dir} ...")
-    train_loader, val_loader = get_dataloaders(
-        dataset_type="mini_librimix",
-        sample_rate=model_config.sample_rate,
-        segment_length=model_config.segment_length,
-        batch_size=args.batch_size,
-        data_dir=args.data_dir,
-        num_workers=args.num_workers,
-        pin_memory=pin_mem,
-        train_samples_per_epoch=args.train_samples_per_epoch,
-    )
-    print(f"  - Train: {len(train_loader.dataset)} samples across {len(train_loader)} batches (pin_memory={pin_mem})")
-    print(f"  - Val:   {len(val_loader.dataset)} samples across {len(val_loader)} batches")
 
     # Composite Loss: uPIT SI-SDR + Multi-Resolution STFT
     if args.mr_stft_weight > 0:
