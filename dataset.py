@@ -38,6 +38,7 @@ class MiniLibriMixDataset(Dataset):
         subset: str = "train",  # 'train' or 'val' or 'dev' or 'test'
         mixture_type: str = "mix_clean",  # 'mix_clean' or 'mix_both'
         cache_in_memory: bool = True,
+        epoch_samples: Optional[int] = None,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -90,8 +91,11 @@ class MiniLibriMixDataset(Dataset):
         self.subset = subset
         self.cache_in_memory = cache_in_memory
         self._raw_cache = {}
+        self.epoch_samples = epoch_samples
 
     def __len__(self) -> int:
+        if self.epoch_samples is not None and self.epoch_samples > 0:
+            return self.epoch_samples
         return len(self.pairs)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -286,6 +290,7 @@ def get_dataloaders(
     wav_folder: Optional[str] = None,
     num_workers: int = 2,
     pin_memory: Optional[bool] = None,
+    train_samples_per_epoch: Optional[int] = None,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Factory creating training and validation DataLoaders for MiniLibriMix or custom WAV folders.
@@ -298,7 +303,13 @@ def get_dataloaders(
         if not _has_audio_files(folder):
             download_mini_librimix(folder)
 
-        train_dataset = MiniLibriMixDataset(folder, sample_rate=sample_rate, segment_length=segment_length, subset="train")
+        train_dataset = MiniLibriMixDataset(
+            folder,
+            sample_rate=sample_rate,
+            segment_length=segment_length,
+            subset="train",
+            epoch_samples=train_samples_per_epoch,
+        )
         val_dataset = MiniLibriMixDataset(folder, sample_rate=sample_rate, segment_length=segment_length, subset="val")
         if len(val_dataset) == 0:
             val_dataset = MiniLibriMixDataset(folder, sample_rate=sample_rate, segment_length=segment_length, subset="dev")

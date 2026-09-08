@@ -54,17 +54,23 @@ def train_one_epoch(
     use_amp: bool = True,
     clip_grad: float = 5.0,
     epoch: int = 1,
-    total_epochs: int = 10,
+    total_epochs: int = 70,
     max_batches: Optional[int] = None,
+    grad_accum_steps: int = 1,
 ) -> float:
-    """Trains the model for one epoch with optional AMP mixed-precision and returns the average training loss."""
+    """Trains the model for one epoch with optional AMP mixed-precision and gradient accumulation."""
     model.train()
     total_loss = 0.0
     total_sisdr = 0.0
     total_batches = len(train_loader) if max_batches is None else min(len(train_loader), max_batches)
     amp_enabled = use_amp and (device.type == "cuda")
 
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
     start_time = time.time()
+    optimizer.zero_grad()
+
     for batch_idx, (mix_batch, target_batch) in enumerate(train_loader):
         if max_batches and batch_idx >= max_batches:
             break
@@ -72,26 +78,30 @@ def train_one_epoch(
         mix_batch = mix_batch.to(device, non_blocking=True)
         target_batch = target_batch.to(device, non_blocking=True)
 
-        optimizer.zero_grad()
-
         # Forward pass under AMP Autocast
         with amp_autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
             separated = model(mix_batch)
             loss, _, sisdr_score = criterion(separated, target_batch)
+            # Scale loss for gradient accumulation
+            loss_scaled = loss / grad_accum_steps
 
         # Backward pass & gradient clipping with Scaler
         if scaler is not None and amp_enabled:
-            scaler.scale(loss).backward()
-            if clip_grad > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss_scaled).backward()
+            if (batch_idx + 1) % grad_accum_steps == 0 or (batch_idx + 1) == total_batches:
+                if clip_grad > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
         else:
-            loss.backward()
-            if clip_grad > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-            optimizer.step()
+            loss_scaled.backward()
+            if (batch_idx + 1) % grad_accum_steps == 0 or (batch_idx + 1) == total_batches:
+                if clip_grad > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+                optimizer.step()
+                optimizer.zero_grad()
 
         total_loss += loss.item()
         total_sisdr += sisdr_score.item()
@@ -101,9 +111,9 @@ def train_one_epoch(
             samples_per_sec = (batch_idx + 1) * mix_batch.size(0) / max(elapsed, 1e-4)
             gpu_mem_str = ""
             if device.type == "cuda":
-                alloc_mb = torch.cuda.memory_allocated(device) / (1024 ** 2)
+                max_alloc_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
                 res_mb = torch.cuda.memory_reserved(device) / (1024 ** 2)
-                gpu_mem_str = f" | VRAM: {alloc_mb:.0f}/{res_mb:.0f} MB"
+                gpu_mem_str = f" | Peak VRAM: {max_alloc_mb:.0f}/{res_mb:.0f} MB"
 
             print(
                 f"  Epoch [{epoch:02d}/{total_epochs:02d}] | "
@@ -202,7 +212,9 @@ def main():
     parser.add_argument("--mask_activation", type=str, default="sigmoid", choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
     parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment duration in seconds")
     parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
-    parser.add_argument("--batch_size", type=int, default=16, help="Training batch size (default: 16)")
+    parser.add_argument("--batch_size", type=int, default=8, help="Training batch size (default: 8)")
+    parser.add_argument("--grad_accum_steps", type=int, default=2, help="Gradient accumulation steps (default: 2)")
+    parser.add_argument("--train_samples_per_epoch", type=int, default=2000, help="Virtual samples per epoch with random cropping (default: 2000)")
     parser.add_argument("--lr", type=float, default=1.5e-3, help="Learning rate for Adam optimizer")
     parser.add_argument("--lr_scheduler", type=str, default="cosine", choices=["cosine", "plateau"], help="Learning rate scheduler ('cosine' or 'plateau')")
     parser.add_argument("--patience", type=int, default=10, help="Epoch patience before decaying LR when using 'plateau' scheduler (default: 10)")
@@ -211,9 +223,9 @@ def main():
     parser.add_argument("--snn_timesteps", type=int, default=6, help="SNN simulation timesteps S (default: 6)")
     parser.add_argument("--snn_beta", type=float, default=0.9, help="LIF membrane potential decay factor")
     parser.add_argument("--surrogate", type=str, default="fast_sigmoid", choices=["fast_sigmoid", "atan", "piecewise"], help="Surrogate gradient function")
-    parser.add_argument("--num_repeats", type=int, default=2, help="Number of dilation stack repeats R")
-    parser.add_argument("--bottleneck_channels", type=int, default=64, help="Number of bottleneck channels B")
-    parser.add_argument("--hidden_channels", type=int, default=128, help="Number of hidden channels H in depthwise blocks")
+    parser.add_argument("--num_repeats", type=int, default=3, help="Number of dilation stack repeats R (default: 3)")
+    parser.add_argument("--bottleneck_channels", type=int, default=128, help="Number of bottleneck channels B (default: 128)")
+    parser.add_argument("--hidden_channels", type=int, default=256, help="Number of hidden channels H in depthwise blocks (default: 256)")
     parser.add_argument("--data_dir", type=str, default="./data/MiniLibriMix", help="Path to MiniLibriMix dataset")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints", help="Directory to save model checkpoints")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers (0 for stability, 2 for multi-process)")
@@ -276,7 +288,8 @@ def main():
     print(f"- Mask Activation: {args.mask_activation}")
     print(f"- Segment Length:  {args.segment_length:.1f}s ({int(args.segment_length * 8000)} samples @ 8kHz)")
     print(f"- Epochs:          {args.epochs}")
-    print(f"- Batch Size:      {args.batch_size}")
+    print(f"- Batch Size:      {args.batch_size} (Grad Accum: {args.grad_accum_steps}x -> Effective Batch Size: {args.batch_size * args.grad_accum_steps})")
+    print(f"- Train Samples:   {args.train_samples_per_epoch} / epoch (dynamic random crops)")
     print(f"- Learning Rate:   {args.lr} (Scheduler: {args.lr_scheduler.upper()})")
     print(f"- Num Repeats (R): {args.num_repeats}")
     print(f"- Channels (B/H):  {args.bottleneck_channels} / {args.hidden_channels}")
@@ -331,6 +344,7 @@ def main():
         data_dir=args.data_dir,
         num_workers=args.num_workers,
         pin_memory=pin_mem,
+        train_samples_per_epoch=args.train_samples_per_epoch,
     )
     print(f"  - Train: {len(train_loader.dataset)} samples across {len(train_loader)} batches (pin_memory={pin_mem})")
     print(f"  - Val:   {len(val_loader.dataset)} samples across {len(val_loader)} batches")
@@ -371,6 +385,7 @@ def main():
             epoch=epoch,
             total_epochs=args.epochs,
             max_batches=args.max_train_batches,
+            grad_accum_steps=args.grad_accum_steps,
         )
 
         val_sisdr = validate(
