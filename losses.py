@@ -51,7 +51,8 @@ def calculate_sisdr(
     s_target_energy = torch.sum(s_target ** 2, dim=-1) + eps
     e_noise_energy = torch.sum(e_noise ** 2, dim=-1) + eps
 
-    sisdr = 10.0 * torch.log10(s_target_energy / e_noise_energy)
+    ratio = torch.clamp(s_target_energy / e_noise_energy, min=eps)
+    sisdr = 10.0 * torch.log10(ratio)
     return sisdr
 
 
@@ -227,41 +228,38 @@ class CombinedPITLoss(nn.Module):
         """
         batch_size, num_sources, _ = estimates.shape
 
+        # Step 1: Pairwise time-domain SI-SDR computation (fast & near-zero autograd memory)
         pairwise_sisdr = torch.zeros(batch_size, num_sources, num_sources, device=estimates.device)
-        pairwise_stft = torch.zeros(batch_size, num_sources, num_sources, device=estimates.device)
-
         for i in range(num_sources):
             for j in range(num_sources):
-                est_i = estimates[:, i, :]
-                tgt_j = targets[:, j, :]
-                pairwise_sisdr[:, i, j] = self.sisdr_loss(est_i, tgt_j)
-                if self.mr_stft_weight > 0:
-                    pairwise_stft[:, i, j] = self.mr_stft_loss(est_i, tgt_j)
+                pairwise_sisdr[:, i, j] = self.sisdr_loss(estimates[:, i, :], targets[:, j, :])
 
-        pairwise_total = pairwise_sisdr + self.mr_stft_weight * pairwise_stft
-
+        # Step 2: Determine optimal permutation per batch item based on SI-SDR
         perm_losses = []
         for perm in self.permutations:
-            loss_for_perm = torch.stack([pairwise_total[:, perm[j], j] for j in range(num_sources)], dim=0)
+            loss_for_perm = torch.stack([pairwise_sisdr[:, perm[j], j] for j in range(num_sources)], dim=0)
             perm_losses.append(loss_for_perm.mean(dim=0))
 
         stacked = torch.stack(perm_losses, dim=0)
-        min_losses, best_perm_indices = torch.min(stacked, dim=0)
+        min_sisdr_losses, best_perm_indices = torch.min(stacked, dim=0)
 
-        # Compute pure SI-SDR metric for reporting
-        perm_sisdr = []
-        for perm in self.permutations:
-            sisdr_p = torch.stack([pairwise_sisdr[:, perm[j], j] for j in range(num_sources)], dim=0)
-            perm_sisdr.append(sisdr_p.mean(dim=0))
-        best_sisdr_batch = -torch.gather(torch.stack(perm_sisdr, dim=0), 0, best_perm_indices.unsqueeze(0)).squeeze(0)
-
+        # Step 3: Align estimates to targets according to winning permutation
         best_estimates = torch.zeros_like(estimates)
         for b in range(batch_size):
             best_perm = self.permutations[best_perm_indices[b]]
             for tgt_idx, est_idx in enumerate(best_perm):
                 best_estimates[b, tgt_idx, :] = estimates[b, est_idx, :]
 
-        total_loss = min_losses.mean()
-        mean_sisdr = best_sisdr_batch.mean()
+        # Step 4: Evaluate expensive Multi-Resolution STFT ONLY on the aligned predictions
+        if self.mr_stft_weight > 0:
+            stft_loss = torch.zeros(batch_size, device=estimates.device)
+            for j in range(num_sources):
+                stft_loss = stft_loss + self.mr_stft_loss(best_estimates[:, j, :], targets[:, j, :])
+            mean_stft_loss = (stft_loss / num_sources).mean()
+            total_loss = min_sisdr_losses.mean() + self.mr_stft_weight * mean_stft_loss
+        else:
+            total_loss = min_sisdr_losses.mean()
+
+        mean_sisdr = -min_sisdr_losses.mean()
 
         return total_loss, best_estimates, mean_sisdr

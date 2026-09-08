@@ -65,7 +65,12 @@ def load_model(checkpoint_path: str, device: torch.device = torch.device("cpu"))
     config = checkpoint.get("model_config", ModelConfig())
     model = SpikingConvTasNet(config)
 
-    model.load_state_dict(checkpoint["model_state_dict"])
+    try:
+        model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    except RuntimeError as e:
+        print(f"[Warning] Exact state_dict key match failed: {e}\nAttempting load with strict=False...")
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+
     model.to(device)
     model.eval()
 
@@ -124,8 +129,17 @@ def evaluate_model(
             loss, best_est, out_sisdr = criterion(est_sources, target_batch)
             _, _, in_sisdr = criterion(mix_batch.repeat(1, 2, 1), target_batch)
 
-            total_output_sisdr.extend(out_sisdr.cpu().tolist())
-            total_input_sisdr.extend(in_sisdr.cpu().tolist())
+            out_val = out_sisdr.cpu().tolist()
+            if isinstance(out_val, list):
+                total_output_sisdr.extend(out_val)
+            else:
+                total_output_sisdr.append(out_val)
+
+            in_val = in_sisdr.cpu().tolist()
+            if isinstance(in_val, list):
+                total_input_sisdr.extend(in_val)
+            else:
+                total_input_sisdr.append(in_val)
 
     out_arr = np.array(total_output_sisdr)
     in_arr = np.array(total_input_sisdr)
@@ -253,7 +267,7 @@ def run_sample_separation(
 
 def main():
     parser = argparse.ArgumentParser(description="Test, Evaluate & Compare Speech Separation Models on NVIDIA CUDA / CPU")
-    parser.add_argument("--snn_checkpoint", type=str, default="checkpoints/best_snn.pt", help="Path to SNN model checkpoint")
+    parser.add_argument("--snn_checkpoint", type=str, default=None, help="Path to SNN checkpoint (default: auto-detects in checkpoints/)")
     parser.add_argument("--ann_checkpoint", type=str, default=None, help="Path to ANN model checkpoint (optional)")
     parser.add_argument("--device", type=str, default="auto", help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
     parser.add_argument("--data_dir", type=str, default="./data/MiniLibriMix", help="Path to MiniLibriMix dataset")
@@ -429,8 +443,26 @@ def main():
         return
 
     # Single Model Evaluation Mode
-    print(f"\n[2/3] Loading Model Checkpoint: {args.snn_checkpoint} ...")
-    snn_model, snn_config, snn_meta = load_model(args.snn_checkpoint, device=device)
+    ckpt_path = args.snn_checkpoint
+    if ckpt_path is None:
+        candidates = [
+            "checkpoints/best_snn_standard_plif.pt",
+            "checkpoints/best_snn_spectrogram_plif.pt",
+            "checkpoints/best_snn_standard.pt",
+            "checkpoints/best_snn_spectrogram.pt",
+        ]
+        for cand in candidates:
+            if os.path.exists(cand):
+                ckpt_path = cand
+                break
+        if ckpt_path is None:
+            print("\n[Error] No SNN model checkpoint found in 'checkpoints/' directory.")
+            print("Please train a model first using: python train.py")
+            print("Or specify a checkpoint path via: python test_model.py --snn_checkpoint <path>")
+            return
+
+    print(f"\n[2/3] Loading Model Checkpoint: {ckpt_path} ...")
+    snn_model, snn_config, snn_meta = load_model(ckpt_path, device=device)
     total_snn_params = sum(p.numel() for p in snn_model.parameters())
     enc_type = getattr(snn_config, "encoder_type", "standard")
     print(f"  - Model Type:       Spiking Conv-TasNet ({enc_type.upper()})")

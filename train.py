@@ -16,6 +16,11 @@ from typing import Optional, Tuple
 import os
 import time
 import argparse
+
+# Configure PyTorch CUDA allocator to prevent memory fragmentation during SNN unrolling
+if "PYTORCH_CUDA_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -210,6 +215,8 @@ def main():
     parser.add_argument("--device", type=str, default="cuda", help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
     parser.add_argument("--amp", dest="use_amp", action="store_true", default=True, help="Enable PyTorch FP16 Automatic Mixed Precision")
     parser.add_argument("--no_amp", dest="use_amp", action="store_false", help="Disable PyTorch AMP (use standard FP32)")
+    parser.add_argument("--checkpointing", dest="use_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (saves ~80% activation VRAM)")
+    parser.add_argument("--no_checkpointing", dest="use_checkpointing", action="store_false", help="Disable gradient checkpointing")
     parser.add_argument("--mask_activation", type=str, default="sigmoid", choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
     parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment duration in seconds")
     parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
@@ -298,6 +305,7 @@ def main():
     print(f"- Spike Encoding:  {args.spike_encoding}")
     print(f"- SNN Readout:     {args.snn_readout}")
     print(f"- Residual Bridge: {args.use_residual_bridge}")
+    print(f"- Checkpointing:   {'Enabled (saves ~80% activation VRAM)' if args.use_checkpointing else 'Disabled'}")
     print(f"- SNN Timesteps S: {args.snn_timesteps}")
     print(f"- SNN Decay Beta:  {args.snn_beta}")
     print(f"- Surrogate Grad:  {args.surrogate}")
@@ -325,6 +333,7 @@ def main():
         num_repeats=args.num_repeats,
         bottleneck_channels=args.bottleneck_channels,
         hidden_channels=args.hidden_channels,
+        use_checkpointing=args.use_checkpointing,
     )
 
     # --- DataLoaders FIRST (before model.to(device)) ---
@@ -396,7 +405,6 @@ def main():
 
     checkpoint_name = f"best_snn_{args.encoder_type}_{args.neuron_type}.pt"
     checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_name)
-    legacy_checkpoint_path = os.path.join(args.checkpoint_dir, f"best_snn.pt")
 
     best_val_sisdr = -float("inf")
     print(f"\n[2/3] Starting Training for {args.epochs} Epochs on {device}...")
@@ -457,7 +465,6 @@ def main():
                 "device": str(device),
             }
             torch.save(checkpoint_data, checkpoint_path)
-            torch.save(checkpoint_data, legacy_checkpoint_path)
             print(f"  [*] Saved new best checkpoint to '{checkpoint_path}' (Val SI-SDR: {val_sisdr:.2f} dB)")
 
         if device.type == "cuda":

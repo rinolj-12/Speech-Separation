@@ -8,6 +8,7 @@ Implements:
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from typing import List, Optional, Tuple
 from snn import SpikingConvBlock1d
 
@@ -59,6 +60,7 @@ class SpikingTCNSeparator(nn.Module):
         snn_readout: str = "membrane",
         use_residual_bridge: bool = True,
         surrogate: str = "fast_sigmoid",
+        use_checkpointing: bool = True,
     ):
         super().__init__()
         if dilations is None:
@@ -73,6 +75,7 @@ class SpikingTCNSeparator(nn.Module):
         self.timesteps = timesteps
         self.snn_readout = snn_readout.lower()
         self.use_residual_bridge = use_residual_bridge
+        self.use_checkpointing = use_checkpointing
 
         # Bottleneck 1x1 conv: [N -> B_conv]
         self.bottleneck_conv = nn.Conv1d(in_channels, bottleneck_channels, kernel_size=1, bias=False)
@@ -100,6 +103,7 @@ class SpikingTCNSeparator(nn.Module):
                     threshold=threshold,
                     timesteps=timesteps,
                     surrogate=surrogate,
+                    return_membrane=(self.snn_readout == "membrane"),
                 )
                 self.blocks.append(block)
 
@@ -150,13 +154,18 @@ class SpikingTCNSeparator(nn.Module):
 
         # Step 2: Pass through stacked spiking dilated conv blocks
         skip_total = torch.zeros_like(x_seq)
-        u_total = torch.zeros_like(x_seq)
+        u_total = torch.zeros_like(x_seq) if self.snn_readout == "membrane" else None
         current_res = x_seq
 
         for block in self.blocks:
-            current_res, skip, u_block = block(current_res)
-            skip_total = skip_total + skip
-            u_total = u_total + u_block
+            if self.use_checkpointing and self.training and current_res.requires_grad:
+                current_res, skip, u_block = checkpoint(block, current_res, use_reentrant=False)
+            else:
+                current_res, skip, u_block = block(current_res)
+
+            skip_total.add_(skip)
+            if u_total is not None and u_block is not None:
+                u_total.add_(u_block)
 
         total_features = skip_total + current_res
 

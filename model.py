@@ -110,6 +110,7 @@ class SpikingConvTasNet(nn.Module):
             snn_readout=getattr(config, "snn_readout", "membrane"),
             use_residual_bridge=getattr(config, "use_residual_bridge", True),
             surrogate=config.surrogate,
+            use_checkpointing=getattr(config, "use_checkpointing", True),
         )
 
     def forward(

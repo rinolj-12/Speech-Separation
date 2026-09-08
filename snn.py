@@ -531,6 +531,7 @@ class SpikingConvBlock1d(nn.Module):
         threshold: float = 0.8,
         timesteps: int = 4,
         surrogate: str = "fast_sigmoid",
+        return_membrane: bool = True,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -538,6 +539,7 @@ class SpikingConvBlock1d(nn.Module):
         self.dilation = dilation
         self.neuron_type = neuron_type.lower()
         self.timesteps = timesteps
+        self.return_membrane = return_membrane
 
         # 1x1 Pointwise conv expansion: [B_conv -> H]
         self.conv1x1_in = nn.Conv1d(in_channels, hidden_channels, kernel_size=1, bias=False)
@@ -640,13 +642,16 @@ class SpikingConvBlock1d(nn.Module):
         flat_res = self.conv1x1_res(flat_s2)
         flat_skip = self.conv1x1_skip(flat_s2)
 
-        flat_u2 = u2_raw_seq.view(s_steps * batch, self.hidden_channels, l_len)
-        flat_u_proj = self.conv1x1_skip(flat_u2)
-
         flat_res_out = self.norm(flat_res + flat_x)
 
         res_seq = flat_res_out.view(s_steps, batch, in_c, l_len)
         skip_seq = flat_skip.view(s_steps, batch, in_c, l_len)
-        u_seq = flat_u_proj.view(s_steps, batch, in_c, l_len)
+
+        if self.return_membrane:
+            flat_u2 = u2_raw_seq.view(s_steps * batch, self.hidden_channels, l_len)
+            flat_u_proj = self.conv1x1_skip(flat_u2)
+            u_seq = flat_u_proj.view(s_steps, batch, in_c, l_len)
+        else:
+            u_seq = None
 
         return res_seq, skip_seq, u_seq
