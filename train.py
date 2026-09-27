@@ -196,9 +196,9 @@ def main():
     parser.add_argument(
         "--spike_encoding",
         type=str,
-        default="learnable_plif",
-        choices=["bit_plane", "fs_neuron", "population", "learnable_plif", "direct_current", "rate", "threshold"],
-        help="Spike encoding scheme for continuous latent W",
+        default="direct_current",
+        choices=["direct_current", "bit_plane", "learnable_plif", "fs_neuron", "population", "rate", "threshold"],
+        help="Spike encoding scheme for continuous latent W (default: direct_current to eliminate temporal quantization dynamic range bottleneck)",
     )
     parser.add_argument(
         "--snn_readout",
@@ -220,7 +220,7 @@ def main():
         action="store_false",
         help="Disable continuous residual bridge (pure SNN masking)",
     )
-    parser.add_argument("--mr_stft_weight", type=float, default=0.5, help="Multi-Resolution STFT auxiliary loss weight (default: 0.5)")
+    parser.add_argument("--mr_stft_weight", type=float, default=0.0, help="Multi-Resolution STFT auxiliary loss weight (default: 0.0 to prevent gradient conflict under mix_both)")
     parser.add_argument("--population_factor", type=int, default=4, help="Gaussian population size when using population coding (default: 4)")
     parser.add_argument("--stft_n_fft", type=int, default=256, help="STFT N_FFT size when using spectrogram encoder (default: 256)")
     parser.add_argument("--stft_hop_length", type=int, default=64, help="STFT hop length when using spectrogram encoder (default: 64)")
@@ -238,8 +238,9 @@ def main():
     parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
     parser.add_argument("--batch_size", type=int, default=4, help="Training batch size (default: 4)")
     parser.add_argument("--grad_accum_steps", type=int, default=4, help="Gradient accumulation steps (default: 4)")
-    parser.add_argument("--train_samples_per_epoch", type=int, default=2000, help="Virtual samples per epoch with random cropping (default: 2000)")
-    parser.add_argument("--lr", type=float, default=1.5e-3, help="Learning rate for Adam optimizer")
+    parser.add_argument("--train_samples_per_epoch", type=int, default=0, help="Virtual samples per epoch. Set to 0 or None for full dataset e.g. 13.9k samples (default: 0)")
+    parser.add_argument("--mixture_type", type=str, default="mix_both", choices=["mix_both", "mix_clean"], help="LibriMix mixture condition: 'mix_both' (noisy) or 'mix_clean' (clean speech only; default: mix_both)")
+    parser.add_argument("--lr", type=float, default=1.0e-3, help="Learning rate for Adam optimizer (default: 1e-3)")
     parser.add_argument("--lr_scheduler", type=str, default="cosine", choices=["cosine", "plateau"], help="Learning rate scheduler ('cosine' or 'plateau')")
     parser.add_argument("--patience", type=int, default=10, help="Epoch patience before decaying LR when using 'plateau' scheduler (default: 10)")
     parser.add_argument("--min_lr", type=float, default=1e-5, help="Minimum learning rate for scheduler (default: 1e-5)")
@@ -250,7 +251,14 @@ def main():
     parser.add_argument("--num_repeats", type=int, default=2, help="Number of dilation stack repeats R (default: 2)")
     parser.add_argument("--bottleneck_channels", type=int, default=128, help="Number of bottleneck channels B (default: 128)")
     parser.add_argument("--hidden_channels", type=int, default=256, help="Number of hidden channels H in depthwise blocks (default: 256)")
-    parser.add_argument("--data_dir", type=str, default="./data/MiniLibriMix", help="Path to MiniLibriMix dataset")
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        default="librimix",
+        choices=["librimix", "mini_librimix", "wav_folder"],
+        help="Dataset type: 'librimix' (default), 'mini_librimix', or 'wav_folder'",
+    )
+    parser.add_argument("--data_dir", type=str, default="./data/Libri2Mix", help="Path to Libri2Mix (or MiniLibriMix) dataset")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints", help="Directory to save model checkpoints")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers (0 for stability, 2 for multi-process)")
     parser.add_argument("--pin_memory", dest="pin_memory", action="store_true", default=None, help="Pin memory for faster host-to-device transfers")
@@ -297,8 +305,9 @@ def main():
         enc_desc = f"1D Conv + SpikeEncoder ({args.spike_encoding})"
 
     print("=" * 68)
-    print("       Training SNN Conv-TasNet on MiniLibriMix")
+    print(f"       Training SNN Conv-TasNet on {args.dataset_type.upper()}")
     print("=" * 68)
+    print(f"- Dataset:         {args.dataset_type} ({args.data_dir})")
     print(f"- Device:          {device} ({gpu_name})")
     if device.type == "cuda":
         print(f"- VRAM Capacity:   {total_vram_gb:.2f} GB | Compute Capability: {cuda_cap[0]}.{cuda_cap[1]}")
@@ -313,7 +322,9 @@ def main():
     print(f"- Segment Length:  {args.segment_length:.1f}s ({int(args.segment_length * 8000)} samples @ 8kHz)")
     print(f"- Epochs:          {args.epochs}")
     print(f"- Batch Size:      {args.batch_size} (Grad Accum: {args.grad_accum_steps}x -> Effective Batch Size: {args.batch_size * args.grad_accum_steps})")
-    print(f"- Train Samples:   {args.train_samples_per_epoch} / epoch (dynamic random crops)")
+    sample_exposure_str = "Full dataset (all utterances / epoch)" if args.train_samples_per_epoch <= 0 else f"{args.train_samples_per_epoch} / epoch (dynamic random crops)"
+    print(f"- Mixture Type:    {args.mixture_type}")
+    print(f"- Train Samples:   {sample_exposure_str}")
     print(f"- Learning Rate:   {args.lr} (Scheduler: {args.lr_scheduler.upper()})")
     print(f"- Num Repeats (R): {args.num_repeats}")
     print(f"- Channels (B/H):  {args.bottleneck_channels} / {args.hidden_channels}")
@@ -375,16 +386,18 @@ def main():
         except OSError:
             pass  # /dev/shm doesn't exist on this platform — leave as-is
 
-    print(f"\n[1/3] Loading MiniLibriMix dataset from: {args.data_dir} ...")
+    print(f"\n[1/3] Loading {args.dataset_type.upper()} dataset from: {args.data_dir} (condition: {args.mixture_type}) ...")
+    effective_train_samples = args.train_samples_per_epoch if args.train_samples_per_epoch > 0 else None
     train_loader, val_loader = get_dataloaders(
-        dataset_type="mini_librimix",
+        dataset_type=args.dataset_type,
         sample_rate=model_config.sample_rate,
         segment_length=model_config.segment_length,
         batch_size=args.batch_size,
         data_dir=args.data_dir,
+        mixture_type=args.mixture_type,
         num_workers=safe_num_workers,
         pin_memory=pin_mem,
-        train_samples_per_epoch=args.train_samples_per_epoch,
+        train_samples_per_epoch=effective_train_samples,
     )
     print(f"  - Train: {len(train_loader.dataset)} samples across {len(train_loader)} batches (pin_memory={pin_mem}, num_workers={safe_num_workers})")
     print(f"  - Val:   {len(val_loader.dataset)} samples across {len(val_loader)} batches")

@@ -33,3 +33,10 @@ test_outputs/
 *.zip
 *.tar.gz
 *.tgz
+
+# IDE & Editor files
+.vscode/
+.idea/
+
+# Documents & PDFs
+*.pdf

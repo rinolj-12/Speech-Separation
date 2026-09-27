@@ -32,12 +32,12 @@ class MiniLibriMixDataset(Dataset):
 
     def __init__(
         self,
-        data_dir: str = "./data/MiniLibriMix",
+        data_dir: str = "./data/Libri2Mix",
         sample_rate: int = 8000,
         segment_length: float = 2.0,
         subset: str = "train",  # 'train' or 'val' or 'dev' or 'test'
-        mixture_type: str = "mix_clean",  # 'mix_clean' or 'mix_both'
-        cache_in_memory: bool = True,
+        mixture_type: str = "mix_both",  # 'mix_both' (noisy) or 'mix_clean'
+        cache_in_memory: bool = False,
         epoch_samples: Optional[int] = None,
     ):
         super().__init__()
@@ -51,12 +51,18 @@ class MiniLibriMixDataset(Dataset):
         if os.path.isdir(data_dir):
             for root, _, _ in os.walk(data_dir):
                 path_parts = [p.lower() for p in os.path.normpath(root).split(os.sep)]
-                if any(s in path_parts for s in target_subsets) or subset == "all":
+                # Matches exact subset name or subfolder like 'train-100', 'train-360', 'dev', etc.
+                matches_subset = any(
+                    any(s in part for s in target_subsets) for part in path_parts
+                ) or subset == "all"
+                if matches_subset:
                     cand_s1 = os.path.join(root, "s1")
                     cand_s2 = os.path.join(root, "s2")
                     cand_mix = os.path.join(root, mixture_type)
                     if not os.path.isdir(cand_mix):
                         cand_mix = os.path.join(root, "mix_both")
+                    if not os.path.isdir(cand_mix):
+                        cand_mix = os.path.join(root, "mix_clean")
                     if not os.path.isdir(cand_mix):
                         cand_mix = os.path.join(root, "mix")
 
@@ -77,6 +83,13 @@ class MiniLibriMixDataset(Dataset):
                     cand_s1 = os.path.join(root, "s1")
                     cand_s2 = os.path.join(root, "s2")
                     cand_mix = os.path.join(root, mixture_type)
+                    if not os.path.isdir(cand_mix):
+                        cand_mix = os.path.join(root, "mix_both")
+                    if not os.path.isdir(cand_mix):
+                        cand_mix = os.path.join(root, "mix_clean")
+                    if not os.path.isdir(cand_mix):
+                        cand_mix = os.path.join(root, "mix")
+
                     if os.path.isdir(cand_s1) and os.path.isdir(cand_s2):
                         for f in sorted(os.listdir(cand_s1)):
                             if f.endswith((".wav", ".flac")):
@@ -281,52 +294,84 @@ def download_mini_librimix(target_dir: str = "./data/MiniLibriMix") -> str:
     return target_dir
 
 
+# Alias for Libri2Mix
+Libri2MixDataset = MiniLibriMixDataset
+
+
 def get_dataloaders(
-    dataset_type: str = "mini_librimix",
+    dataset_type: str = "librimix",
     sample_rate: int = 8000,
     segment_length: float = 2.0,
     batch_size: int = 4,
-    data_dir: str = "./data/MiniLibriMix",
+    data_dir: str = "./data/Libri2Mix",
     wav_folder: Optional[str] = None,
     num_workers: int = 2,
     pin_memory: Optional[bool] = None,
     train_samples_per_epoch: Optional[int] = None,
+    mixture_type: str = "mix_both",
 ) -> Tuple[DataLoader, DataLoader]:
     """
-    Factory creating training and validation DataLoaders for MiniLibriMix or custom WAV folders.
+    Factory creating training and validation DataLoaders for Libri2Mix, MiniLibriMix, or custom WAV folders.
     """
     if pin_memory is None:
         pin_memory = torch.cuda.is_available()
 
-    if dataset_type in ["mini_librimix", "librimix"]:
-        folder = data_dir if data_dir else "./data/MiniLibriMix"
-        if not _has_audio_files(folder):
-            download_mini_librimix(folder)
+    effective_epoch_samples = train_samples_per_epoch if (train_samples_per_epoch and train_samples_per_epoch > 0) else None
 
-        train_dataset = MiniLibriMixDataset(
+    if dataset_type in ["librimix", "libri2mix", "mini_librimix"]:
+        folder = data_dir if data_dir else "./data/Libri2Mix"
+        
+        # Automatic fallback: if Libri2Mix directory is missing audio but MiniLibriMix exists, use MiniLibriMix
+        if not _has_audio_files(folder):
+            if os.path.normpath(folder) == os.path.normpath("./data/Libri2Mix") and _has_audio_files("./data/MiniLibriMix"):
+                print(f"[Dataset Info] '{folder}' audio files not found. Auto-falling back to './data/MiniLibriMix'...")
+                folder = "./data/MiniLibriMix"
+            elif dataset_type == "mini_librimix":
+                download_mini_librimix(folder)
+            else:
+                raise RuntimeError(
+                    f"No audio samples found in '{folder}'.\n"
+                    f"Libri2Mix must be generated on your training machine.\n"
+                    f"Please run: bash scripts/setup_data.sh to generate Libri2Mix train-100 (8kHz).\n"
+                    f"Or pass --dataset_type mini_librimix --data_dir ./data/MiniLibriMix to use the mini version."
+                )
+
+        train_dataset = Libri2MixDataset(
             folder,
             sample_rate=sample_rate,
             segment_length=segment_length,
             subset="train",
-            epoch_samples=train_samples_per_epoch,
+            mixture_type=mixture_type,
+            epoch_samples=effective_epoch_samples,
         )
-        val_dataset = MiniLibriMixDataset(folder, sample_rate=sample_rate, segment_length=segment_length, subset="val")
+        val_dataset = Libri2MixDataset(
+            folder,
+            sample_rate=sample_rate,
+            segment_length=segment_length,
+            subset="val",
+            mixture_type=mixture_type,
+        )
         if len(val_dataset) == 0:
-            val_dataset = MiniLibriMixDataset(folder, sample_rate=sample_rate, segment_length=segment_length, subset="dev")
+            val_dataset = Libri2MixDataset(
+                folder,
+                sample_rate=sample_rate,
+                segment_length=segment_length,
+                subset="dev",
+                mixture_type=mixture_type,
+            )
         if len(val_dataset) == 0:
             val_dataset = train_dataset
 
         if len(train_dataset) == 0:
             raise RuntimeError(
-                f"No audio samples found in '{folder}'. MiniLibriMix is still downloading or not extracted. "
-                f"Please wait for the background download to finish, or check './data/MiniLibriMix'."
+                f"No audio samples found in '{folder}'. Please verify the dataset path or run bash scripts/setup_data.sh."
             )
 
     elif dataset_type == "wav_folder" and wav_folder:
         train_dataset = WavFolderDataset(wav_folder, sample_rate=sample_rate, segment_length=segment_length)
         val_dataset = train_dataset
     else:
-        raise ValueError(f"Unknown dataset_type '{dataset_type}'. Choose 'mini_librimix' or 'wav_folder'.")
+        raise ValueError(f"Unknown dataset_type '{dataset_type}'. Choose 'librimix', 'mini_librimix', or 'wav_folder'.")
 
     persistent = (num_workers > 0)
     train_loader = DataLoader(

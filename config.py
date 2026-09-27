@@ -48,8 +48,10 @@ class ModelConfig:
     surrogate: str = "fast_sigmoid"        # Surrogate gradient: 'fast_sigmoid', 'atan', 'piecewise'
     
     # Spike Encoding Schemes
-    # Options: 'bit_plane', 'population', 'learnable_plif', 'direct_current', 'rate', 'threshold'
-    spike_encoding: str = "learnable_plif"
+    # Options: 'direct_current' (preserves full continuous dynamic range into SNN),
+    #          'bit_plane' (high-precision radix-2, 64 levels at S=6),
+    #          'learnable_plif', 'population', 'rate', 'threshold'
+    spike_encoding: str = "direct_current"
     population_factor: int = 4   # Expansion factor K when using 'population' encoding
     
     # TCN Separator Architecture (Depthwise Dilated Convolutions)
@@ -67,7 +69,7 @@ class ModelConfig:
     use_residual_bridge: bool = True # Continuous residual skip connection to mask head
     
     # Loss Regularization Hyperparameters
-    mr_stft_weight: float = 0.5      # Multi-resolution STFT auxiliary loss weight
+    mr_stft_weight: float = 0.0      # Multi-resolution STFT auxiliary loss weight (0.0 for mix_both to prevent objective conflict with uPIT SI-SDR)
     spike_reg_weight: float = 1e-4   # Spike rate regularization penalty weight
     
     # Debugging
@@ -79,8 +81,8 @@ class TrainConfig:
     """Training, optimization, and dataset hyperparameters matching train.py defaults."""
     batch_size: int = 4              # Mini-batch size (matches train.py default: 4)
     grad_accum_steps: int = 4        # Gradient accumulation steps (effective batch size: 4 * 4 = 16)
-    train_samples_per_epoch: int = 2000 # Virtual sample crops per epoch
-    learning_rate: float = 1.5e-3    # Adam learning rate
+    train_samples_per_epoch: Optional[int] = None # None or 0 to train on all dataset samples (e.g. 13.9k) per epoch
+    learning_rate: float = 1.0e-3    # Adam learning rate (1e-3 provides stable SNN surrogate convergence)
     lr_scheduler: str = "cosine"     # 'cosine' or 'plateau'
     patience: int = 10               # Patience for plateau scheduler
     min_lr: float = 1e-5             # Minimum learning rate
@@ -98,8 +100,9 @@ class TrainConfig:
     num_workers: int = 0             # DataLoader workers (0 for stability/container safety)
     
     # Dataset settings
-    dataset_type: str = "mini_librimix"  # 'mini_librimix' or 'wav_folder'
-    data_dir: str = "./data/MiniLibriMix" # Path to MiniLibriMix dataset
+    dataset_type: str = "librimix"       # 'librimix', 'mini_librimix', or 'wav_folder'
+    data_dir: str = "./data/Libri2Mix"   # Path to Libri2Mix (or ./data/MiniLibriMix)
+    mixture_type: str = "mix_both"       # 'mix_both' (noisy speech) or 'mix_clean'
     
     # Paths & Logging
     checkpoint_dir: str = "./checkpoints"

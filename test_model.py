@@ -270,9 +270,17 @@ def main():
     parser.add_argument("--snn_checkpoint", type=str, default=None, help="Path to SNN checkpoint (default: auto-detects in checkpoints/)")
     parser.add_argument("--ann_checkpoint", type=str, default=None, help="Path to ANN model checkpoint (optional)")
     parser.add_argument("--device", type=str, default="auto", help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
-    parser.add_argument("--data_dir", type=str, default="./data/MiniLibriMix", help="Path to MiniLibriMix dataset")
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        default="librimix",
+        choices=["librimix", "mini_librimix", "wav_folder"],
+        help="Dataset type: 'librimix' (default), 'mini_librimix', or 'wav_folder'",
+    )
+    parser.add_argument("--data_dir", type=str, default="./data/Libri2Mix", help="Path to Libri2Mix (or MiniLibriMix) dataset")
     parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment length in seconds for evaluation (default: 2.0s)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for validation")
+    parser.add_argument("--mixture_type", type=str, default="mix_both", choices=["mix_both", "mix_clean"], help="LibriMix mixture condition: 'mix_both' (noisy) or 'mix_clean' (clean speech only; default: mix_both)")
     parser.add_argument("--max_batches", type=int, default=None, help="Limit number of validation batches (optional)")
     parser.add_argument("--output_dir", type=str, default="./test_outputs", help="Directory to save test audio & plots")
     parser.add_argument("--compare_encoders", action="store_true", help="Run benchmark comparing standard and spectrogram encoders")
@@ -285,16 +293,19 @@ def main():
     print("       Spiking Conv-TasNet Speech Separation Model Testing")
     print("=" * 68)
     print(f"- Device:          {device} ({gpu_name})")
+    print(f"- Dataset:         {args.dataset_type} ({args.data_dir})")
+    print(f"- Mixture Type:    {args.mixture_type}")
 
     # Load Validation Dataset
     eval_segment_len = args.segment_length
-    print(f"\n[1/3] Preparing Validation Dataset from: {args.data_dir} (Segment length: {eval_segment_len:.1f}s) ...")
+    print(f"\n[1/3] Preparing Validation Dataset from: {args.data_dir} (Segment length: {eval_segment_len:.1f}s, condition: {args.mixture_type}) ...")
     _, val_loader = get_dataloaders(
-        dataset_type="mini_librimix",
+        dataset_type=args.dataset_type,
         sample_rate=8000,
         segment_length=eval_segment_len,
         batch_size=args.batch_size,
         data_dir=args.data_dir,
+        mixture_type=args.mixture_type,
         num_workers=0,
         pin_memory=(device.type == "cuda"),
     )
