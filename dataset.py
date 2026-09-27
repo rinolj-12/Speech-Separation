@@ -367,8 +367,11 @@ def get_dataloaders(
                 f"No audio samples found in '{folder}'. Please verify the dataset path or run bash scripts/setup_data.sh."
             )
 
-    elif dataset_type == "wav_folder" and wav_folder:
-        train_dataset = WavFolderDataset(wav_folder, sample_rate=sample_rate, segment_length=segment_length)
+    elif dataset_type == "wav_folder":
+        folder = wav_folder or data_dir
+        if not folder or not os.path.isdir(folder):
+            raise ValueError(f"WavFolderDataset directory '{folder}' not found. Please provide a valid --data_dir.")
+        train_dataset = WavFolderDataset(folder, sample_rate=sample_rate, segment_length=segment_length)
         val_dataset = train_dataset
     else:
         raise ValueError(f"Unknown dataset_type '{dataset_type}'. Choose 'librimix', 'mini_librimix', or 'wav_folder'.")
