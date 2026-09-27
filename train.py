@@ -453,7 +453,7 @@ def main():
         resume_target = checkpoint_path if args.resume == "auto" else args.resume
         if os.path.exists(resume_target):
             print(f"[Resume] Loading checkpoint from: {resume_target}")
-            ckpt = torch.load(resume_target, map_location=device)
+            ckpt = torch.load(resume_target, map_location=device, weights_only=False)
             raw_model.load_state_dict(ckpt["model_state_dict"])
             if "optimizer_state_dict" in ckpt:
                 try:
