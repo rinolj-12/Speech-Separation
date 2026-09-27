@@ -265,6 +265,7 @@ def main():
     parser.add_argument("--max_train_batches", type=int, default=None, help="Limit number of training batches per epoch (optional)")
     parser.add_argument("--max_val_batches", type=int, default=None, help="Limit number of validation batches (optional)")
     parser.add_argument("--num_threads", type=int, default=6, help="Number of CPU threads for PyTorch fallback")
+    parser.add_argument("--resume", nargs="?", const="auto", default=None, help="Resume training from checkpoint path or 'auto' for best checkpoint")
     args = parser.parse_args()
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -444,10 +445,30 @@ def main():
     checkpoint_name = f"best_snn_{args.encoder_type}_{args.neuron_type}.pt"
     checkpoint_path = os.path.join(args.checkpoint_dir, checkpoint_name)
 
+    start_epoch = 1
     best_val_sisdr = -float("inf")
-    print(f"\n[2/3] Starting Training for {args.epochs} Epochs on {device}...")
 
-    for epoch in range(1, args.epochs + 1):
+    # Resume from checkpoint if requested
+    if args.resume:
+        resume_target = checkpoint_path if args.resume == "auto" else args.resume
+        if os.path.exists(resume_target):
+            print(f"[Resume] Loading checkpoint from: {resume_target}")
+            ckpt = torch.load(resume_target, map_location=device)
+            raw_model.load_state_dict(ckpt["model_state_dict"])
+            if "optimizer_state_dict" in ckpt:
+                try:
+                    optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                except Exception as e:
+                    print(f"[Resume] Warning: Could not restore optimizer state ({e}). Using fresh optimizer.")
+            start_epoch = ckpt.get("epoch", 0) + 1
+            best_val_sisdr = ckpt.get("val_sisdr", -float("inf"))
+            print(f"[Resume] Resumed successfully. Starting at Epoch {start_epoch}, previous best Val SI-SDR: {best_val_sisdr:.2f} dB")
+        else:
+            print(f"[Resume] Warning: Checkpoint '{resume_target}' not found. Starting from scratch.")
+
+    print(f"\n[2/3] Starting Training from Epoch {start_epoch} to {args.epochs} on {device}...")
+
+    for epoch in range(start_epoch, args.epochs + 1):
         epoch_start = time.time()
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
 

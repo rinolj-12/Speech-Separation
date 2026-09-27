@@ -144,20 +144,35 @@ def main():
         else:
             print(f"  [OK] Found {check_dir.name}")
 
-    # WHAM! noise
+    # WHAM! noise (Zenodo official mirror)
     wham_check_1 = storage_path / "wham_noise" / "wham_noise"
     wham_check_2 = storage_path / "wham_noise"
-    if not wham_check_1.exists() and not (wham_check_2.exists() and any(wham_check_2.iterdir())):
+    has_wham = wham_check_1.exists() or (wham_check_2.exists() and any(wham_check_2.iterdir()))
+    
+    if not has_wham:
         wham_zip = storage_path / "wham_noise.zip"
-        download_file("https://my-bucket-a8b330c0211311ea95e78743e64dec85.s3.amazonaws.com/wham_noise.zip", wham_zip)
-        extract_archive(wham_zip, storage_path)
-    else:
-        print("  [OK] Found WHAM! noise")
+        # Try Zenodo official mirror first
+        wham_urls = [
+            "https://zenodo.org/records/3338999/files/wham_noise.zip?download=1",
+            "https://storage.googleapis.com/whisper-speech-dataset/wham_noise.zip"
+        ]
+        for url in wham_urls:
+            try:
+                print(f"  Attempting WHAM! noise download from: {url}")
+                download_file(url, wham_zip)
+                extract_archive(wham_zip, storage_path)
+                has_wham = True
+                break
+            except Exception as e:
+                print(f"  [Warning] Failed from {url}: {e}")
+                if wham_zip.exists():
+                    wham_zip.unlink()
 
     wham_dir = wham_check_1 if wham_check_1.exists() else wham_check_2
 
     # Step 4: Run LibriMix generation script
-    print("\n[4/4] Generating Libri2Mix audio (mix_both & mix_clean @ 8 kHz)...")
+    types_to_generate = ["mix_clean", "mix_both"] if has_wham else ["mix_clean"]
+    print(f"\n[4/4] Generating Libri2Mix audio ({' & '.join(types_to_generate)} @ 8 kHz)...")
     librimix_outdir = storage_path / "Libri2Mix"
     librimix_outdir.mkdir(parents=True, exist_ok=True)
 
@@ -168,13 +183,13 @@ def main():
         sys.executable,
         str(create_script),
         "--librispeech_dir", str(librispeech_dir),
-        "--wham_dir", str(wham_dir),
+        "--wham_dir", str(wham_dir if has_wham else librispeech_dir),
         "--metadata_dir", str(metadata_dir),
         "--librimix_outdir", str(librimix_outdir),
         "--n_src", "2",
         "--freqs", "8k",
         "--modes", "min",
-        "--types", "mix_clean", "mix_both",
+        "--types", *types_to_generate,
     ]
 
     print(f"  Running: {' '.join(cmd)}")
