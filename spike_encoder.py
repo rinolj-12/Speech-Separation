@@ -241,7 +241,7 @@ class SpikeEncoder(nn.Module):
         if self.encoder is not None:
             spike_seq = self.encoder(w)
         elif self.encoding_type == "direct_current":
-            spike_seq = w.unsqueeze(0).expand(self.timesteps, -1, -1, -1)
+            spike_seq = w.unsqueeze(0).expand(self.timesteps, -1, -1, -1).contiguous()
         elif self.encoding_type == "rate":
             w_norm = torch.clamp(w / (self.threshold + 1e-7), min=0.0, max=1.0)
             probs = w_norm.unsqueeze(0).repeat(self.timesteps, 1, 1, 1)

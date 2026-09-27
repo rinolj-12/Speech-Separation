@@ -306,8 +306,8 @@ def main():
         print("          ENCODER COMPARISON BENCHMARK ON MINILIBRIMIX")
         print("=" * 80)
         encoder_candidates = [
-            ("Standard 1-D Conv + Spike", ["checkpoints/best_snn_standard_plif.pt", "checkpoints/best_snn_standard.pt"]),
-            ("STFT Spectrogram + iSTFT", ["checkpoints/best_snn_spectrogram_plif.pt", "checkpoints/best_snn_spectrogram.pt"]),
+            ("Standard 1-D Conv + Spike", ["checkpoints/best_snn_standard.pt", "checkpoints/best_snn_standard_plif.pt"]),
+            ("STFT Spectrogram + iSTFT", ["checkpoints/best_snn_spectrogram.pt", "checkpoints/best_snn_spectrogram_plif.pt"]),
         ]
 
         benchmark_rows = []

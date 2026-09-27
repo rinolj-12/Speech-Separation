@@ -600,9 +600,9 @@ class SpikingConvBlock1d(nn.Module):
         is_adaptive = any(x in self.neuron_type for x in ["alif", "aplif"])
 
         # Step 1: Vectorized 1x1 input expansion for all S simulation steps
-        flat_x = spike_seq.view(s_steps * batch, in_c, l_len)
+        flat_x = spike_seq.reshape(s_steps * batch, in_c, l_len)
         flat_h1 = self.norm1(self.conv1x1_in(flat_x))
-        h1_seq = flat_h1.view(s_steps, batch, self.hidden_channels, l_len)
+        h1_seq = flat_h1.reshape(s_steps, batch, self.hidden_channels, l_len)
 
         # Step 2: Temporal recurrent SNN simulation
         u1 = torch.zeros(batch, self.hidden_channels, l_len, device=spike_seq.device)
@@ -639,20 +639,20 @@ class SpikingConvBlock1d(nn.Module):
         s2_seq = torch.stack(s2_list, dim=0)
         u2_raw_seq = torch.stack(u2_list, dim=0)
 
-        flat_s2 = s2_seq.view(s_steps * batch, self.hidden_channels, l_len)
+        flat_s2 = s2_seq.reshape(s_steps * batch, self.hidden_channels, l_len)
         flat_res = self.conv1x1_res(flat_s2)
         flat_skip = self.conv1x1_skip(flat_s2)
 
         flat_res_out = self.norm(flat_res + flat_x)
 
-        res_seq = flat_res_out.view(s_steps, batch, in_c, l_len)
-        skip_seq = flat_skip.view(s_steps, batch, in_c, l_len)
+        res_seq = flat_res_out.reshape(s_steps, batch, in_c, l_len)
+        skip_seq = flat_skip.reshape(s_steps, batch, in_c, l_len)
 
         if self.return_membrane:
-            flat_u2 = u2_raw_seq.view(s_steps * batch, self.hidden_channels, l_len)
+            flat_u2 = u2_raw_seq.reshape(s_steps * batch, self.hidden_channels, l_len)
             # Use dedicated membrane projection (conv1x1_mem), not the skip connection weights
             flat_u_proj = self.conv1x1_mem(flat_u2)
-            u_seq = flat_u_proj.view(s_steps, batch, in_c, l_len)
+            u_seq = flat_u_proj.reshape(s_steps, batch, in_c, l_len)
         else:
             u_seq = None
 

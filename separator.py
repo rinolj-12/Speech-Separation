@@ -148,9 +148,9 @@ class SpikingTCNSeparator(nn.Module):
         s_steps, batch, n_chan, l_len = spike_seq.shape
 
         # Step 1: Apply bottleneck 1x1 conv to each simulation timestep
-        flat_spikes = spike_seq.view(s_steps * batch, n_chan, l_len)
+        flat_spikes = spike_seq.reshape(s_steps * batch, n_chan, l_len)
         flat_bottleneck = self.bottleneck_norm(self.bottleneck_conv(flat_spikes))
-        x_seq = flat_bottleneck.view(s_steps, batch, self.bottleneck_channels, l_len)
+        x_seq = flat_bottleneck.reshape(s_steps, batch, self.bottleneck_channels, l_len)
 
         # Step 2: Pass through stacked spiking dilated conv blocks
         skip_total = torch.zeros_like(x_seq)
@@ -193,7 +193,7 @@ class SpikingTCNSeparator(nn.Module):
         mask_raw = self.mask_conv(readout)
 
         # Reshape to [B, K, N, L]
-        masks = mask_raw.view(batch, self.num_sources, self.in_channels, l_len)
+        masks = mask_raw.reshape(batch, self.num_sources, self.in_channels, l_len)
 
         masks = self.activation(masks)
 

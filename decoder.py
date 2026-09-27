@@ -76,7 +76,7 @@ class ConvTasNetDecoder(nn.Module):
         if is_multi_source:
             # Shape: [B, K, N, L] -> flatten batch and speaker dimensions: [B*K, N, L]
             b, k, n, l = w_masked.shape
-            w_flat = w_masked.view(b * k, n, l)
+            w_flat = w_masked.reshape(b * k, n, l)
             audio_flat = self.conv_transpose1d(w_flat)  # [B*K, 1, T_recon]
             
             # Trim or pad to exact target length if specified
@@ -89,7 +89,7 @@ class ConvTasNetDecoder(nn.Module):
             
             # Reshape back to [B, K, T]
             time_dim = audio_flat.shape[-1]
-            audio = audio_flat.view(b, k, time_dim)
+            audio = audio_flat.reshape(b, k, time_dim)
         else:
             # Shape: [B, N, L]
             audio = self.conv_transpose1d(w_masked)  # [B, 1, T_recon]
@@ -180,7 +180,7 @@ class SpectrogramDecoder(nn.Module):
 
         if is_multi_source:
             b, k, n, l = w_masked.shape
-            w_flat = w_masked.view(b * k, n, l)
+            w_flat = w_masked.reshape(b * k, n, l)
 
             # Map from latent channels N -> frequency bins F
             if self.unproj is not None:
@@ -190,7 +190,7 @@ class SpectrogramDecoder(nn.Module):
 
             # Expand phase across sources: [B, F, L] -> [B*K, F, L]
             if phase is not None:
-                phase_flat = phase.unsqueeze(1).repeat(1, k, 1, 1).view(b * k, -1, l)
+                phase_flat = phase.unsqueeze(1).repeat(1, k, 1, 1).reshape(b * k, -1, l)
             else:
                 phase_flat = torch.zeros_like(mag_flat)
 
@@ -213,7 +213,7 @@ class SpectrogramDecoder(nn.Module):
 
             # Reshape back to [Batch, Num_Sources, Time]
             time_dim = audio_flat.shape[-1]
-            audio = audio_flat.view(b, k, time_dim)
+            audio = audio_flat.reshape(b, k, time_dim)
 
             # Exact length trim/pad if necessary
             if target_length is not None:

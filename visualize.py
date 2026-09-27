@@ -680,6 +680,7 @@ def save_separate_comparison_plots(
         ax1.bar(names, latencies, color="#e377c2", edgecolor="black", alpha=0.85)
         ax1.set_title("Inference Latency per Sample (ms)", fontsize=11, fontweight="bold")
         ax1.set_ylabel("Latency (ms)")
+        ax1.set_xticks(range(len(names)))
         ax1.set_xticklabels(names, rotation=15, ha="right")
         ax1.grid(True, alpha=0.3, axis="y")
         for i, v in enumerate(latencies):
@@ -688,6 +689,7 @@ def save_separate_comparison_plots(
         ax2.bar(names, params_k, color="#ff7f0e", edgecolor="black", alpha=0.85)
         ax2.set_title("Model Parameters (Thousands)", fontsize=11, fontweight="bold")
         ax2.set_ylabel("Parameters (k)")
+        ax2.set_xticks(range(len(names)))
         ax2.set_xticklabels(names, rotation=15, ha="right")
         ax2.grid(True, alpha=0.3, axis="y")
         for i, v in enumerate(params_k):
