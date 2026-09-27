@@ -187,11 +187,13 @@ class WavFolderDataset(Dataset):
         folder_path: str,
         sample_rate: int = 8000,
         segment_length: float = 2.0,
+        epoch_samples: Optional[int] = None,
     ):
         super().__init__()
         self.folder_path = folder_path
         self.sample_rate = sample_rate
         self.segment_samples = int(sample_rate * segment_length)
+        self.epoch_samples = epoch_samples
         self.wav_files = []
 
         if os.path.isdir(folder_path):
@@ -201,6 +203,8 @@ class WavFolderDataset(Dataset):
                         self.wav_files.append(os.path.join(root, f))
 
     def __len__(self) -> int:
+        if self.epoch_samples is not None and self.epoch_samples > 0:
+            return min(self.epoch_samples, max(len(self.wav_files) // 2, 0))
         return max(len(self.wav_files) // 2, 0)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -371,8 +375,9 @@ def get_dataloaders(
         folder = wav_folder or data_dir
         if not folder or not os.path.isdir(folder):
             raise ValueError(f"WavFolderDataset directory '{folder}' not found. Please provide a valid --data_dir.")
-        train_dataset = WavFolderDataset(folder, sample_rate=sample_rate, segment_length=segment_length)
-        val_dataset = train_dataset
+        train_dataset = WavFolderDataset(folder, sample_rate=sample_rate, segment_length=segment_length, epoch_samples=effective_epoch_samples)
+        # Validation uses a fixed 200 samples so validation finishes in seconds instead of 10 minutes
+        val_dataset = WavFolderDataset(folder, sample_rate=sample_rate, segment_length=segment_length, epoch_samples=200)
     else:
         raise ValueError(f"Unknown dataset_type '{dataset_type}'. Choose 'librimix', 'mini_librimix', or 'wav_folder'.")
 
