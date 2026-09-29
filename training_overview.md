@@ -87,7 +87,7 @@ Evaluated on held-out LibriMix multi-speaker validation pairs via [`test_model.p
 
 ### 3. Per-Sample Plot Metric (~7.2 dB) vs. Global Dataset Mean (3.53 dB)
 
-In the generated Matplotlib waveform comparison plot ([`waveform_comparison_all.png`](file:///d:/Speech-Separation-main/Speech-Separation-main/test_outputs/spectrogram/waveform_comparison_all.png)), the figure title reports **SI-SDR = 7.22 dB**. Here is how this relates to the training validation log:
+In the generated Matplotlib waveform comparison plot ([`waveform_comparison_all.png`](file:///home/rinolj/Music/Speech/test_outputs/spectrogram/waveforms/waveform_comparison_all.png)), the figure title reports **SI-SDR = 7.22 dB**. Here is how this relates to the training validation log:
 
 - **Per-Sample Score (7.22 dB in plot)**: Calculated specifically on the single representative 2-speaker utterance (`mix_batch[0]`) visualized in the test suite. When speakers have distinct frequency/formant profiles, the SNN model separates them cleanly, reaching **7 to 9.5 dB**.
 - **Global Dataset Mean (3.53 dB in training log)**: The unweighted mean across all **3,000 validation utterances**. This dataset-wide metric includes difficult test cases (overlapping pitch, same-gender speakers, low-energy segments), which pulls the global average to 3.53 dB.
@@ -104,17 +104,17 @@ In the generated Matplotlib waveform comparison plot ([`waveform_comparison_all.
 
 ### 4. Generated Evaluation Artifacts
 
-All separated speech WAV files and visual diagnostic plots have been generated and saved under [`test_outputs/spectrogram/`](file:///d:/Speech-Separation-main/Speech-Separation-main/test_outputs/spectrogram):
+All separated speech WAV files and visual diagnostic plots have been generated and saved under [`test_outputs/spectrogram/`](file:///home/rinolj/Music/Speech/test_outputs/spectrogram):
 
-- **Audio Files**:
+- **Audio Files** (`test_outputs/spectrogram/audio/`):
   - `mixture.wav` — Unseparated 2-speaker mixed input
   - `target_speaker1.wav` & `target_speaker2.wav` — Ground truth clean speech
   - `separated_speaker1.wav` & `separated_speaker2.wav` — SNN model separated speech
 - **Diagnostic Plots**:
-  - `waveform_comparison_all.png` — Multi-channel waveform overlays (displays per-sample 7.22 dB SI-SDR)
-  - `spectrogram_overview.png` — Time-frequency spectrogram representation
-  - `mask_analysis_summary.png` — Estimated separation masks and contrast distribution
-  - `snn_raster_summary.png` — Spiking neural network raster & layer firing rates
+  - `waveforms/waveform_comparison_all.png` — Multi-channel waveform overlays (displays per-sample 7.22 dB SI-SDR)
+  - `spectrograms/spectrogram_overview.png` — Time-frequency spectrogram representation
+  - `masks/mask_analysis_summary.png` — Estimated separation masks and contrast distribution
+  - `snn/snn_raster_summary.png` — Spiking neural network raster & layer firing rates
 
 ### 5. Reviewer Q&A: How to Answer "What is the Model's Accuracy?"
 

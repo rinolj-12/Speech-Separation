@@ -298,21 +298,27 @@ python3 test_model.py --device cpu --snn_checkpoint checkpoints/best_snn_standar
 
 ## 📂 Test Outputs (`test_outputs/`)
 
-Running `test_model.py` generates the following files, organized by encoder:
+Running `test_model.py` generates the following files, organized by encoder and category:
 
 ```
 test_outputs/
 ├── standard_encoder/
-│   ├── mixture.wav
-│   ├── target_speaker1.wav, target_speaker2.wav
-│   ├── separated_speaker1.wav, separated_speaker2.wav
-│   ├── waveform_*.png          # Waveform overlays & comparisons
-│   ├── spectrogram_*.png       # Per-speaker spectrogram views
-│   ├── mask_*.png              # Estimated masks & distributions
-│   └── snn_*.png               # Spike rasters & firing rate charts
+│   ├── audio/
+│   │   ├── mixture.wav
+│   │   ├── target_speaker1.wav, target_speaker2.wav
+│   │   └── separated_speaker1.wav, separated_speaker2.wav
+│   ├── waveforms/
+│   │   └── waveform_*.png          # Waveform overlays & comparisons
+│   ├── spectrograms/
+│   │   └── spectrogram_*.png       # Per-speaker spectrogram views
+│   ├── masks/
+│   │   └── mask_*.png              # Estimated masks & distributions
+│   └── snn/
+│       └── snn_*.png               # Spike rasters & firing rate charts
 ├── spectrogram/
 │   └── (same structure as above)
-└── comparison_*.png            # Cross-encoder SI-SDR, latency & waveform charts
+└── comparisons/
+    └── comparison_*.png            # Cross-encoder SI-SDR, latency & waveform charts
 ```
 
 ---

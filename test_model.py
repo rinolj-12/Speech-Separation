@@ -212,12 +212,25 @@ def run_sample_separation(
 
     sr = config.sample_rate
 
-    # Save audio files inside the encoder subfolder
-    audio_mix_path = os.path.join(enc_output_dir, "mixture.wav")
-    audio_tgt1_path = os.path.join(enc_output_dir, "target_speaker1.wav")
-    audio_tgt2_path = os.path.join(enc_output_dir, "target_speaker2.wav")
-    audio_sep1_path = os.path.join(enc_output_dir, "separated_speaker1.wav")
-    audio_sep2_path = os.path.join(enc_output_dir, "separated_speaker2.wav")
+    # Define categorized subdirectories inside encoder folder
+    audio_dir = os.path.join(enc_output_dir, "audio")
+    waveform_dir = os.path.join(enc_output_dir, "waveforms")
+    spec_dir = os.path.join(enc_output_dir, "spectrograms")
+    mask_dir = os.path.join(enc_output_dir, "masks")
+    snn_dir = os.path.join(enc_output_dir, "snn")
+
+    os.makedirs(audio_dir, exist_ok=True)
+    os.makedirs(waveform_dir, exist_ok=True)
+    os.makedirs(spec_dir, exist_ok=True)
+    os.makedirs(mask_dir, exist_ok=True)
+    os.makedirs(snn_dir, exist_ok=True)
+
+    # Save audio files inside audio/ subfolder
+    audio_mix_path = os.path.join(audio_dir, "mixture.wav")
+    audio_tgt1_path = os.path.join(audio_dir, "target_speaker1.wav")
+    audio_tgt2_path = os.path.join(audio_dir, "target_speaker2.wav")
+    audio_sep1_path = os.path.join(audio_dir, "separated_speaker1.wav")
+    audio_sep2_path = os.path.join(audio_dir, "separated_speaker2.wav")
 
     sf.write(audio_mix_path, mix_np, sr)
     sf.write(audio_tgt1_path, targets_np[0], sr)
@@ -225,18 +238,18 @@ def run_sample_separation(
     sf.write(audio_sep1_path, est_np[0], sr)
     sf.write(audio_sep2_path, est_np[1], sr)
 
-    print(f"\n[Audio Wave Outputs Saved in '{enc_output_dir}']")
+    print(f"\n[Audio Wave Outputs Saved in '{audio_dir}']")
     print(f"  - Mixture:              {audio_mix_path}")
     print(f"  - Ground Truth Spk 1:   {audio_tgt1_path}")
     print(f"  - Ground Truth Spk 2:   {audio_tgt2_path}")
     print(f"  - Separated Spk 1:      {audio_sep1_path}")
     print(f"  - Separated Spk 2:      {audio_sep2_path}")
 
-    # Generate and save separate visual analysis plots
-    print(f"\n[Generating Separate PNG Visualizations in '{enc_output_dir}']")
+    # Generate and save separate visual analysis plots in respective subfolders
+    print(f"\n[Generating Categorized PNG Visualizations in '{enc_output_dir}']")
     wav_paths = save_separate_waveforms(
         mix_np, targets_np, est_np, sample_rate=sr,
-        output_dir=enc_output_dir,
+        output_dir=waveform_dir,
         title_suffix=f"(SI-SDR = {sample_sisdr.item():.2f} dB)"
     )
     for p in wav_paths.values():
@@ -244,25 +257,25 @@ def run_sample_separation(
 
     spec_paths = save_separate_spectrograms(
         mix_np, targets_np, est_np, sample_rate=sr,
-        output_dir=enc_output_dir,
+        output_dir=spec_dir,
     )
     for p in spec_paths.values():
         print(f"  - Spectrogram PNG:      {p}")
 
     mask_paths = save_separate_mask_plots(
         masks_np,
-        output_dir=enc_output_dir,
+        output_dir=mask_dir,
         title_suffix=f"({model.encoder_type.capitalize()} Masks)"
     )
     for p in mask_paths.values():
         print(f"  - Mask PNG:             {p}")
 
     if spike_seq is not None:
-        raster_paths = save_separate_snn_raster_plots(spike_seq, output_dir=enc_output_dir)
+        raster_paths = save_separate_snn_raster_plots(spike_seq, output_dir=snn_dir)
         for p in raster_paths.values():
             print(f"  - SNN Spike PNG:        {p}")
 
-    print(f"[Done] All audio waves and separate PNGs saved in '{enc_output_dir}'")
+    print(f"[Done] All audio waves and separate PNGs organized into subfolders in '{enc_output_dir}'")
 
 
 def main():
@@ -407,12 +420,25 @@ def main():
                     "sisdri": float(s_sisdr.item() - in_sisdr.item()),
                 }
 
-                # Save audio files inside this encoder's subfolder
-                audio_mix_path = os.path.join(enc_dir, "mixture.wav")
-                audio_tgt1_path = os.path.join(enc_dir, "target_speaker1.wav")
-                audio_tgt2_path = os.path.join(enc_dir, "target_speaker2.wav")
-                audio_sep1_path = os.path.join(enc_dir, "separated_speaker1.wav")
-                audio_sep2_path = os.path.join(enc_dir, "separated_speaker2.wav")
+                # Define categorized subdirectories inside encoder folder
+                audio_dir = os.path.join(enc_dir, "audio")
+                waveform_dir = os.path.join(enc_dir, "waveforms")
+                spec_dir = os.path.join(enc_dir, "spectrograms")
+                mask_dir = os.path.join(enc_dir, "masks")
+                snn_dir = os.path.join(enc_dir, "snn")
+
+                os.makedirs(audio_dir, exist_ok=True)
+                os.makedirs(waveform_dir, exist_ok=True)
+                os.makedirs(spec_dir, exist_ok=True)
+                os.makedirs(mask_dir, exist_ok=True)
+                os.makedirs(snn_dir, exist_ok=True)
+
+                # Save audio files inside this encoder's audio/ subfolder
+                audio_mix_path = os.path.join(audio_dir, "mixture.wav")
+                audio_tgt1_path = os.path.join(audio_dir, "target_speaker1.wav")
+                audio_tgt2_path = os.path.join(audio_dir, "target_speaker2.wav")
+                audio_sep1_path = os.path.join(audio_dir, "separated_speaker1.wav")
+                audio_sep2_path = os.path.join(audio_dir, "separated_speaker2.wav")
 
                 sf.write(audio_mix_path, mix_np, sr)
                 sf.write(audio_tgt1_path, targets_np[0], sr)
@@ -420,31 +446,33 @@ def main():
                 sf.write(audio_sep1_path, est_np[0], sr)
                 sf.write(audio_sep2_path, est_np[1], sr)
 
-                # Save separate PNGs inside this encoder's subfolder
+                # Save separate PNGs inside this encoder's categorized subfolders
                 save_separate_waveforms(
                     mix_np, targets_np, est_np, sample_rate=sr,
-                    output_dir=enc_dir,
+                    output_dir=waveform_dir,
                     title_suffix=f"[{name}] (SI-SDR = {s_sisdr.item():.2f} dB)"
                 )
                 save_separate_spectrograms(
                     mix_np, targets_np, est_np, sample_rate=sr,
-                    output_dir=enc_dir,
+                    output_dir=spec_dir,
                 )
                 save_separate_mask_plots(
                     masks_np,
-                    output_dir=enc_dir,
+                    output_dir=mask_dir,
                     title_suffix=f"({name} Masks)"
                 )
                 if spike_seq is not None:
-                    save_separate_snn_raster_plots(spike_seq, output_dir=enc_dir)
+                    save_separate_snn_raster_plots(spike_seq, output_dir=snn_dir)
 
-            # Generate cross-encoder comparison figures in test_outputs/ root
-            print(f"\n[Generating Cross-Encoder Comparison PNGs in '{args.output_dir}'] ...")
+            # Generate cross-encoder comparison figures in comparisons/ subfolder
+            comp_dir = os.path.join(args.output_dir, "comparisons")
+            os.makedirs(comp_dir, exist_ok=True)
+            print(f"\n[Generating Cross-Encoder Comparison PNGs in '{comp_dir}'] ...")
             comp_paths = save_separate_comparison_plots(
                 mix_np, targets_np, model_preds_dict,
                 benchmark_rows=benchmark_rows,
                 sample_rate=sr,
-                output_dir=args.output_dir,
+                output_dir=comp_dir,
             )
             for p in comp_paths.values():
                 print(f"  - Comparison PNG:       {p}")
