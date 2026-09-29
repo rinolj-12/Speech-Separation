@@ -4,13 +4,10 @@ Datasets and Audio Mixture Loaders for Speech Separation.
 Provides:
 1. MiniLibriMixDataset: Real 2-speaker speech separation dataset from LibriMix.
 2. WavFolderDataset: Dataset loader for custom audio/speech WAV files.
-3. download_mini_librimix: Automated downloader and extractor for MiniLibriMix.
-4. get_dataloaders: High-level dataloader factory for training and validation.
+3. get_dataloaders: High-level dataloader factory for training and validation.
 """
 
 import os
-import urllib.request
-import zipfile
 import numpy as np
 import soundfile as sf
 import torch
@@ -249,55 +246,6 @@ def _has_audio_files(directory: str) -> bool:
     return False
 
 
-def download_mini_librimix(target_dir: str = "./data/MiniLibriMix") -> str:
-    """
-    Downloads and extracts MiniLibriMix dataset (~580 MB) from Zenodo if not present.
-    """
-    os.makedirs(target_dir, exist_ok=True)
-    zip_path = os.path.join(target_dir, "MiniLibriMix.zip")
-
-    if not _has_audio_files(target_dir):
-        url = "https://zenodo.org/records/3871592/files/MiniLibriMix.zip?download=1"
-        print(f"[Dataset] Downloading MiniLibriMix (~580MB) from Zenodo...", flush=True)
-
-        downloaded = False
-        # Try curl / wget first with cross-platform quoting
-        if os.system(f'curl -L --fail -o "{zip_path}" "{url}"') == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 100000000:
-            downloaded = True
-        elif os.system(f'wget -O "{zip_path}" "{url}"') == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 100000000:
-            downloaded = True
-
-        if not downloaded:
-            req = urllib.request.Request(url, headers={"User-Agent": "curl/7.81.0"})
-            try:
-                with urllib.request.urlopen(req) as response, open(zip_path, "wb") as out_file:
-                    chunk_size = 1024 * 1024  # 1MB
-                    bytes_dl = 0
-                    while True:
-                        chunk = response.read(chunk_size)
-                        if not chunk:
-                            break
-                        out_file.write(chunk)
-                        bytes_dl += len(chunk)
-                        if bytes_dl % (50 * 1024 * 1024) == 0:
-                            print(f"  Downloaded {bytes_dl / (1024 * 1024):.0f} MB ...", flush=True)
-                downloaded = True
-            except Exception as e:
-                print(f"[Dataset Warning] Download failed: {e}", flush=True)
-
-        if downloaded or (os.path.exists(zip_path) and os.path.getsize(zip_path) > 500000000):
-            print("[Dataset] Extracting MiniLibriMix.zip ...", flush=True)
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
-            print(f"[Dataset] MiniLibriMix extracted successfully to {target_dir}!", flush=True)
-        else:
-            print(f"[Dataset] Downloading in progress or please ensure MiniLibriMix.zip is in {target_dir}", flush=True)
-    else:
-        print(f"[Dataset] MiniLibriMix directory ready at {target_dir}", flush=True)
-
-    return target_dir
-
-
 # Alias for Libri2Mix
 Libri2MixDataset = MiniLibriMixDataset
 
@@ -328,16 +276,12 @@ def get_dataloaders(
         # Automatic fallback: if Libri2Mix directory is missing audio but MiniLibriMix exists, use MiniLibriMix
         if not _has_audio_files(folder):
             if os.path.normpath(folder) == os.path.normpath("./data/Libri2Mix") and _has_audio_files("./data/MiniLibriMix"):
-                print(f"[Dataset Info] '{folder}' audio files not found. Auto-falling back to './data/MiniLibriMix'...")
+                print(f"[Dataset Info] '{folder}' audio files not found. Auto-falling back to existing './data/MiniLibriMix'...")
                 folder = "./data/MiniLibriMix"
-            elif dataset_type == "mini_librimix":
-                download_mini_librimix(folder)
             else:
                 raise RuntimeError(
                     f"No audio samples found in '{folder}'.\n"
-                    f"Libri2Mix must be generated on your training machine.\n"
-                    f"Please run: bash scripts/setup_data.sh to generate Libri2Mix train-100 (8kHz).\n"
-                    f"Or pass --dataset_type mini_librimix --data_dir ./data/MiniLibriMix to use the mini version."
+                    f"Please ensure the dataset folder exists and contains audio files."
                 )
 
         train_dataset = Libri2MixDataset(

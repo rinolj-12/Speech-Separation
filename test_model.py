@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple, List, Optional, Dict
 
-from config import ModelConfig
+from config import ModelConfig, TrainConfig
 from model import SpikingConvTasNet, build_model
 from losses import calculate_sisdr, NegSISDRLoss, PITLossWrapper
 from dataset import get_dataloaders
@@ -266,6 +266,9 @@ def run_sample_separation(
 
 
 def main():
+    default_model_cfg = ModelConfig()
+    default_train_cfg = TrainConfig()
+
     parser = argparse.ArgumentParser(description="Test, Evaluate & Compare Speech Separation Models on NVIDIA CUDA / CPU")
     parser.add_argument("--snn_checkpoint", type=str, default=None, help="Path to SNN checkpoint (default: auto-detects in checkpoints/)")
     parser.add_argument("--ann_checkpoint", type=str, default=None, help="Path to ANN model checkpoint (optional)")
@@ -273,14 +276,14 @@ def main():
     parser.add_argument(
         "--dataset_type",
         type=str,
-        default="librimix",
+        default=default_train_cfg.dataset_type,
         choices=["librimix", "mini_librimix", "wav_folder"],
         help="Dataset type: 'librimix' (default), 'mini_librimix', or 'wav_folder'",
     )
-    parser.add_argument("--data_dir", type=str, default="./data/Libri2Mix", help="Path to Libri2Mix (or MiniLibriMix) dataset")
-    parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment length in seconds for evaluation (default: 2.0s)")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for validation")
-    parser.add_argument("--mixture_type", type=str, default="mix_both", choices=["mix_both", "mix_clean"], help="LibriMix mixture condition: 'mix_both' (noisy) or 'mix_clean' (clean speech only; default: mix_both)")
+    parser.add_argument("--data_dir", type=str, default=default_train_cfg.data_dir, help="Path to Libri2Mix (or MiniLibriMix) dataset")
+    parser.add_argument("--segment_length", type=float, default=default_model_cfg.segment_length, help="Audio segment length in seconds for evaluation")
+    parser.add_argument("--batch_size", type=int, default=default_train_cfg.batch_size, help="Batch size for validation")
+    parser.add_argument("--mixture_type", type=str, default=default_train_cfg.mixture_type, choices=["mix_both", "mix_clean"], help="LibriMix mixture condition: 'mix_both' (noisy) or 'mix_clean' (clean speech only)")
     parser.add_argument("--max_batches", type=int, default=None, help="Limit number of validation batches (optional)")
     parser.add_argument("--output_dir", type=str, default="./test_outputs", help="Directory to save test audio & plots")
     parser.add_argument("--compare_encoders", action="store_true", help="Run benchmark comparing standard and spectrogram encoders")

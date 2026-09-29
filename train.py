@@ -178,32 +178,35 @@ def validate(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train SNN Conv-TasNet on MiniLibriMix with NVIDIA CUDA & AMP")
+    default_model_cfg = ModelConfig()
+    default_train_cfg = TrainConfig()
+
+    parser = argparse.ArgumentParser(description="Train SNN Conv-TasNet on Libri2Mix / MiniLibriMix with NVIDIA CUDA & AMP")
     parser.add_argument(
         "--encoder_type",
         type=str,
-        default="standard",
+        default=default_model_cfg.encoder_type,
         choices=["standard", "spectrogram", "stft"],
         help="Encoder type: 'standard' (1D Conv+SpikeEncoder) or 'spectrogram' (STFT magnitude+iSTFT)",
     )
     parser.add_argument(
         "--neuron_type",
         type=str,
-        default="plif",
+        default=default_model_cfg.neuron_type,
         choices=["plif", "alif", "aplif", "fs_neuron", "lif"],
         help="SNN neuron model ('plif', 'alif', 'aplif', 'fs_neuron', 'lif')",
     )
     parser.add_argument(
         "--spike_encoding",
         type=str,
-        default="direct_current",
+        default=default_model_cfg.spike_encoding,
         choices=["direct_current", "bit_plane", "learnable_plif", "fs_neuron", "population", "rate", "threshold"],
-        help="Spike encoding scheme for continuous latent W (default: direct_current to eliminate temporal quantization dynamic range bottleneck)",
+        help="Spike encoding scheme for continuous latent W",
     )
     parser.add_argument(
         "--snn_readout",
         type=str,
-        default="membrane",
+        default=default_model_cfg.snn_readout,
         choices=["membrane", "weighted_bit", "rate"],
         help="SNN temporal mask readout strategy ('membrane', 'weighted_bit', 'rate')",
     )
@@ -211,7 +214,7 @@ def main():
         "--use_residual_bridge",
         dest="use_residual_bridge",
         action="store_true",
-        default=True,
+        default=default_model_cfg.use_residual_bridge,
         help="Enable continuous residual bridge to mask generator head",
     )
     parser.add_argument(
@@ -220,51 +223,51 @@ def main():
         action="store_false",
         help="Disable continuous residual bridge (pure SNN masking)",
     )
-    parser.add_argument("--mr_stft_weight", type=float, default=0.0, help="Multi-Resolution STFT auxiliary loss weight (default: 0.0 to prevent gradient conflict under mix_both)")
-    parser.add_argument("--population_factor", type=int, default=4, help="Gaussian population size when using population coding (default: 4)")
-    parser.add_argument("--stft_n_fft", type=int, default=256, help="STFT N_FFT size when using spectrogram encoder (default: 256)")
-    parser.add_argument("--stft_hop_length", type=int, default=64, help="STFT hop length when using spectrogram encoder (default: 64)")
-    parser.add_argument("--encoder_channels", type=int, default=None, help="Number of latent channels N (default: matches STFT bins or 64)")
-    parser.add_argument("--stft_use_projection", dest="stft_use_projection", action="store_true", default=None, help="Enable 1x1 Conv projection between STFT bins and encoder_channels")
+    parser.add_argument("--mr_stft_weight", type=float, default=default_model_cfg.mr_stft_weight, help="Multi-Resolution STFT auxiliary loss weight")
+    parser.add_argument("--population_factor", type=int, default=default_model_cfg.population_factor, help="Gaussian population size when using population coding")
+    parser.add_argument("--stft_n_fft", type=int, default=default_model_cfg.stft_n_fft, help="STFT N_FFT size when using spectrogram encoder")
+    parser.add_argument("--stft_hop_length", type=int, default=default_model_cfg.stft_hop_length, help="STFT hop length when using spectrogram encoder")
+    parser.add_argument("--encoder_channels", type=int, default=default_model_cfg.encoder_channels, help="Number of latent channels N")
+    parser.add_argument("--stft_use_projection", dest="stft_use_projection", action="store_true", default=default_model_cfg.stft_use_projection, help="Enable 1x1 Conv projection between STFT bins and encoder_channels")
     parser.add_argument("--no_stft_projection", dest="stft_use_projection", action="store_false", help="Disable projection: direct 1:1 STFT frequency bin masking")
-    parser.add_argument("--device", type=str, default="cuda", help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
-    parser.add_argument("--amp", dest="use_amp", action="store_true", default=True, help="Enable PyTorch FP16 Automatic Mixed Precision")
+    parser.add_argument("--device", type=str, default=default_train_cfg.device, help="Device: 'auto', 'cuda', 'cuda:0', or 'cpu'")
+    parser.add_argument("--amp", dest="use_amp", action="store_true", default=default_train_cfg.use_amp, help="Enable PyTorch FP16 Automatic Mixed Precision")
     parser.add_argument("--no_amp", dest="use_amp", action="store_false", help="Disable PyTorch AMP (use standard FP32)")
-    parser.add_argument("--checkpointing", dest="use_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (saves ~80%% activation VRAM)")
+    parser.add_argument("--checkpointing", dest="use_checkpointing", action="store_true", default=default_model_cfg.use_checkpointing, help="Enable gradient checkpointing (saves ~80% activation VRAM)")
     parser.add_argument("--no_checkpointing", dest="use_checkpointing", action="store_false", help="Disable gradient checkpointing")
-    parser.add_argument("--multi_gpu", dest="multi_gpu", action="store_true", default=False, help="Enable DataParallel across multiple GPUs (experimental; single-GPU is recommended)")
-    parser.add_argument("--mask_activation", type=str, default="sigmoid", choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
-    parser.add_argument("--segment_length", type=float, default=2.0, help="Audio segment duration in seconds")
-    parser.add_argument("--epochs", type=int, default=70, help="Number of training epochs (default: 70)")
-    parser.add_argument("--batch_size", type=int, default=4, help="Training batch size (default: 4)")
-    parser.add_argument("--grad_accum_steps", type=int, default=4, help="Gradient accumulation steps (default: 4)")
-    parser.add_argument("--train_samples_per_epoch", type=int, default=0, help="Virtual samples per epoch. Set to 0 or None for full dataset e.g. 13.9k samples (default: 0)")
-    parser.add_argument("--mixture_type", type=str, default="mix_both", choices=["mix_both", "mix_clean"], help="LibriMix mixture condition: 'mix_both' (noisy) or 'mix_clean' (clean speech only; default: mix_both)")
-    parser.add_argument("--lr", type=float, default=1.0e-3, help="Learning rate for Adam optimizer (default: 1e-3)")
-    parser.add_argument("--lr_scheduler", type=str, default="cosine", choices=["cosine", "plateau"], help="Learning rate scheduler ('cosine' or 'plateau')")
-    parser.add_argument("--patience", type=int, default=10, help="Epoch patience before decaying LR when using 'plateau' scheduler (default: 10)")
-    parser.add_argument("--min_lr", type=float, default=1e-5, help="Minimum learning rate for scheduler (default: 1e-5)")
-    parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay regularization")
-    parser.add_argument("--snn_timesteps", type=int, default=6, help="SNN simulation timesteps S (default: 6)")
-    parser.add_argument("--snn_beta", type=float, default=0.9, help="LIF membrane potential decay factor")
-    parser.add_argument("--surrogate", type=str, default="fast_sigmoid", choices=["fast_sigmoid", "atan", "piecewise"], help="Surrogate gradient function")
-    parser.add_argument("--num_repeats", type=int, default=2, help="Number of dilation stack repeats R (default: 2)")
-    parser.add_argument("--bottleneck_channels", type=int, default=128, help="Number of bottleneck channels B (default: 128)")
-    parser.add_argument("--hidden_channels", type=int, default=256, help="Number of hidden channels H in depthwise blocks (default: 256)")
+    parser.add_argument("--multi_gpu", dest="multi_gpu", action="store_true", default=False, help="Enable DataParallel across multiple GPUs")
+    parser.add_argument("--mask_activation", type=str, default=default_model_cfg.mask_activation, choices=["sigmoid", "softmax", "relu"], help="Mask activation function")
+    parser.add_argument("--segment_length", type=float, default=default_model_cfg.segment_length, help="Audio segment duration in seconds")
+    parser.add_argument("--epochs", type=int, default=default_train_cfg.epochs, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=default_train_cfg.batch_size, help="Training batch size")
+    parser.add_argument("--grad_accum_steps", type=int, default=default_train_cfg.grad_accum_steps, help="Gradient accumulation steps")
+    parser.add_argument("--train_samples_per_epoch", type=int, default=0, help="Virtual samples per epoch (0 for full dataset)")
+    parser.add_argument("--mixture_type", type=str, default=default_train_cfg.mixture_type, choices=["mix_both", "mix_clean"], help="Mixture condition: 'mix_both' or 'mix_clean'")
+    parser.add_argument("--lr", type=float, default=default_train_cfg.learning_rate, help="Learning rate for Adam optimizer")
+    parser.add_argument("--lr_scheduler", type=str, default=default_train_cfg.lr_scheduler, choices=["cosine", "plateau"], help="Learning rate scheduler")
+    parser.add_argument("--patience", type=int, default=default_train_cfg.patience, help="Epoch patience before decaying LR when using 'plateau' scheduler")
+    parser.add_argument("--min_lr", type=float, default=default_train_cfg.min_lr, help="Minimum learning rate for scheduler")
+    parser.add_argument("--weight_decay", type=float, default=default_train_cfg.weight_decay, help="Weight decay regularization")
+    parser.add_argument("--snn_timesteps", type=int, default=default_model_cfg.snn_timesteps, help="SNN simulation timesteps S")
+    parser.add_argument("--snn_beta", type=float, default=default_model_cfg.snn_beta, help="LIF membrane potential decay factor")
+    parser.add_argument("--surrogate", type=str, default=default_model_cfg.surrogate, choices=["fast_sigmoid", "atan", "piecewise"], help="Surrogate gradient function")
+    parser.add_argument("--num_repeats", type=int, default=default_model_cfg.num_repeats, help="Number of dilation stack repeats R")
+    parser.add_argument("--bottleneck_channels", type=int, default=default_model_cfg.bottleneck_channels, help="Number of bottleneck channels B")
+    parser.add_argument("--hidden_channels", type=int, default=default_model_cfg.hidden_channels, help="Number of hidden channels H in depthwise blocks")
     parser.add_argument(
         "--dataset_type",
         type=str,
-        default="librimix",
+        default=default_train_cfg.dataset_type,
         choices=["librimix", "mini_librimix", "wav_folder"],
-        help="Dataset type: 'librimix' (default), 'mini_librimix', or 'wav_folder'",
+        help="Dataset type: 'librimix', 'mini_librimix', or 'wav_folder'",
     )
-    parser.add_argument("--data_dir", type=str, default="./data/Libri2Mix", help="Path to Libri2Mix (or MiniLibriMix) dataset")
-    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints", help="Directory to save model checkpoints")
-    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers (0 for stability, 2 for multi-process)")
-    parser.add_argument("--pin_memory", dest="pin_memory", action="store_true", default=None, help="Pin memory for faster host-to-device transfers")
+    parser.add_argument("--data_dir", type=str, default=default_train_cfg.data_dir, help="Path to Libri2Mix (or MiniLibriMix) dataset")
+    parser.add_argument("--checkpoint_dir", type=str, default=default_train_cfg.checkpoint_dir, help="Directory to save model checkpoints")
+    parser.add_argument("--num_workers", type=int, default=default_train_cfg.num_workers, help="DataLoader workers")
+    parser.add_argument("--pin_memory", dest="pin_memory", action="store_true", default=default_train_cfg.pin_memory, help="Pin memory for faster host-to-device transfers")
     parser.add_argument("--max_train_batches", type=int, default=None, help="Limit number of training batches per epoch (optional)")
     parser.add_argument("--max_val_batches", type=int, default=None, help="Limit number of validation batches (optional)")
-    parser.add_argument("--num_threads", type=int, default=6, help="Number of CPU threads for PyTorch fallback")
+    parser.add_argument("--num_threads", type=int, default=default_train_cfg.num_threads, help="Number of CPU threads for PyTorch fallback")
     parser.add_argument("--resume", nargs="?", const="auto", default=None, help="Resume training from checkpoint path or 'auto' for best checkpoint")
     args = parser.parse_args()
 
