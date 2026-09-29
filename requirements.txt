@@ -1,15 +1,35 @@
-# NVIDIA CUDA GPU acceleration (INSTALLED: torch 2.11.0+cu128, CUDA 12.8)
-# To install PyTorch with CUDA 12.8 support, run:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# ============================================================
+# Python dependencies for Spiking Conv-TasNet
+# ============================================================
 #
-# NOTE: torch, torchvision, torchaudio must be installed from the cu128 index above.
-#       Do NOT install plain 'torch' from PyPI — it will give the CPU-only build.
-torch>=2.11.0
-torchaudio>=2.11.0
-torchvision>=0.26.0
-snntorch>=0.6.0
-numpy>=1.20.0
-matplotlib>=3.5.0
-scipy>=1.8.0
-soundfile>=0.12.0
-pandas>=1.3.0
+# PyTorch must be installed SEPARATELY before this file.
+# Choose the right command for your hardware:
+#
+#   GPU (NVIDIA CUDA 12.8):
+#     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#
+#   CPU only (any OS, no GPU):
+#     pip install torch torchvision torchaudio
+#
+# Then install the remaining dependencies listed below:
+#   pip install -r requirements.txt
+# ============================================================
+
+# Spiking Neural Network framework (must match your torch version)
+snntorch>=1.0.0
+
+# Numerical & Scientific
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Audio I/O
+soundfile>=0.12.1
+
+# Data handling (also required internally by snntorch)
+pandas>=2.0.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Utilities
+tqdm>=4.65.0

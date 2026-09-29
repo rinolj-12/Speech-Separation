@@ -15,6 +15,7 @@ ENV/
 venv311/
 
 # Large Datasets & Temp Distributions
+# NOTE: checkpoints/ is intentionally NOT ignored so model weights are tracked.
 data/
 .dist/
 
@@ -27,7 +28,7 @@ data/
 *.bak
 *~
 
-# Archives
+# Archives (downloaded datasets etc.)
 *.zip
 *.tar.gz
 *.tgz

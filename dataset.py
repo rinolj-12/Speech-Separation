@@ -8,6 +8,9 @@ Provides:
 """
 
 import os
+import sys
+import urllib.request
+import zipfile
 import numpy as np
 import soundfile as sf
 import torch
@@ -246,6 +249,160 @@ def _has_audio_files(directory: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# MiniLibriMix auto-downloader
+# ---------------------------------------------------------------------------
+
+_MINI_LIBRIMIX_ZENODO_URL = "https://zenodo.org/records/3871592/files/MiniLibriMix.zip?download=1"
+_MINI_LIBRIMIX_FALLBACK_URL = "https://zenodo.org/record/3871592/files/MiniLibriMix.zip"
+
+
+def _download_with_progress(url: str, dest_path: str) -> None:
+    """Downloads a file from *url* to *dest_path* with a live progress bar."""
+    req = urllib.request.Request(url, headers={"User-Agent": "curl/7.81.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            total_bytes_str = resp.headers.get("content-length")
+            total_bytes = int(total_bytes_str) if total_bytes_str else None
+            downloaded = 0
+            chunk = 1024 * 1024  # 1 MB
+            with open(dest_path, "wb") as out:
+                while True:
+                    buf = resp.read(chunk)
+                    if not buf:
+                        break
+                    out.write(buf)
+                    downloaded += len(buf)
+                    if total_bytes:
+                        pct = downloaded / total_bytes * 100
+                        bar_len = 40
+                        filled = int(bar_len * downloaded / total_bytes)
+                        bar = "#" * filled + "-" * (bar_len - filled)
+                        print(
+                            f"\r  [{bar}] {downloaded/(1024**2):.1f}/{total_bytes/(1024**2):.1f} MB ({pct:.1f}%)",
+                            end="",
+                            flush=True,
+                        )
+                    else:
+                        print(f"\r  {downloaded/(1024**2):.1f} MB downloaded", end="", flush=True)
+            print()  # newline after progress bar
+    except Exception as exc:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise RuntimeError(f"Download failed from {url}: {exc}") from exc
+
+
+def download_minilibrimix(dest_dir: str = "./data") -> str:
+    """
+    Downloads and extracts the official MiniLibriMix dataset from Zenodo.
+
+    MiniLibriMix is a ~580 MB subset of Libri2Mix (1000 train + 1000 val pairs @
+    8 kHz) released by the original LibriMix authors.  No SoX or extra tools
+    are needed — just Python.
+
+    Args:
+        dest_dir: Parent folder where ``MiniLibriMix/`` will be created.
+
+    Returns:
+        Absolute path to the extracted ``MiniLibriMix`` directory.
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    zip_path = os.path.join(dest_dir, "MiniLibriMix.zip")
+    out_dir  = os.path.join(dest_dir, "MiniLibriMix")
+
+    # Already there?
+    if _has_audio_files(out_dir):
+        print(f"[Dataset] MiniLibriMix already present at '{out_dir}'. Skipping download.")
+        return os.path.abspath(out_dir)
+
+    print("=" * 68)
+    print("  Downloading MiniLibriMix from Zenodo (~580 MB)")
+    print("=" * 68)
+    print(f"  URL : {_MINI_LIBRIMIX_ZENODO_URL}")
+    print(f"  Dest: {zip_path}")
+
+    # Try primary URL, fall back to mirror
+    for url in [_MINI_LIBRIMIX_ZENODO_URL, _MINI_LIBRIMIX_FALLBACK_URL]:
+        try:
+            _download_with_progress(url, zip_path)
+            break
+        except RuntimeError as exc:
+            print(f"  [Warning] {exc}  — trying fallback URL…")
+    else:
+        raise RuntimeError(
+            "Could not download MiniLibriMix from any mirror.\n"
+            "Check your internet connection or download manually from:\n"
+            f"  {_MINI_LIBRIMIX_ZENODO_URL}\n"
+            f"and extract it to '{out_dir}'."
+        )
+
+    print(f"  Extracting to '{dest_dir}' …")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(dest_dir)
+    os.remove(zip_path)  # free disk space
+
+    if not _has_audio_files(out_dir):
+        raise RuntimeError(
+            f"Extraction finished but no audio files found in '{out_dir}'.\n"
+            "The zip may be corrupt — please delete it and retry."
+        )
+
+    print(f"[Dataset] MiniLibriMix downloaded and extracted to '{out_dir}'.")
+    return os.path.abspath(out_dir)
+
+
+def _prompt_dataset_setup(requested_dir: str) -> str:
+    """
+    Interactive prompt shown when no audio dataset is found.
+    Offers to:
+      1. Auto-download MiniLibriMix (~580 MB, no SoX needed).
+      2. Run the full Libri2Mix generator (requires SoX, ~15 GB).
+      3. Abort.
+
+    Returns the folder path to use after setup, or raises SystemExit.
+    """
+    print()
+    print("=" * 68)
+    print("  No audio dataset found.")
+    print(f"  Looked in: '{requested_dir}'")
+    print("=" * 68)
+    print()
+    print("  Choose how to get the dataset:")
+    print("    [1] Download MiniLibriMix (~580 MB, ~1 000 pairs, no SoX needed)")
+    print("        Recommended for first run / CPU-only laptops.")
+    print("    [2] Generate full Libri2Mix train-100 via setup script")
+    print("        (~15–20 GB, requires SoX.  Run the script manually:)")
+    print("          python scripts/setup_data.py --storage_dir ./data")
+    print("        This will take a long time — start it in a separate terminal.")
+    print("    [3] Abort and handle manually")
+    print()
+
+    # Non-interactive environments (CI, containers) — default to option 1
+    if not sys.stdin.isatty():
+        print("  [Non-interactive mode] Defaulting to option 1 (MiniLibriMix auto-download).")
+        choice = "1"
+    else:
+        try:
+            choice = input("  Enter choice [1/2/3] (default 1): ").strip() or "1"
+        except (EOFError, KeyboardInterrupt):
+            choice = "3"
+
+    if choice == "1":
+        data_parent = os.path.dirname(os.path.abspath(requested_dir))
+        # If the user pointed at Libri2Mix, put MiniLibriMix next to it
+        return download_minilibrimix(dest_dir=data_parent)
+    elif choice == "2":
+        print()
+        print("  Run the following command in your terminal and then restart training:")
+        print("    python scripts/setup_data.py --storage_dir ./data")
+        raise SystemExit(0)
+    else:
+        raise SystemExit(
+            "Aborted.  Please provide a dataset directory with audio files.\n"
+            "See README.md ➜ 'Step 3 — Get the Dataset' for instructions."
+        )
+
+
 # Alias for Libri2Mix
 Libri2MixDataset = MiniLibriMixDataset
 
@@ -272,17 +429,24 @@ def get_dataloaders(
 
     if dataset_type in ["librimix", "libri2mix", "mini_librimix"]:
         folder = data_dir if data_dir else "./data/Libri2Mix"
-        
-        # Automatic fallback: if Libri2Mix directory is missing audio but MiniLibriMix exists, use MiniLibriMix
+
+        # ── Dataset resolution priority ─────────────────────────────────────
+        # 1. Use the requested folder directly if it already has audio.
+        # 2. If requesting Libri2Mix but only MiniLibriMix is present, auto-
+        #    fall back to MiniLibriMix (no user action needed).
+        # 3. If nothing is found anywhere, interactively ask the user to either
+        #    auto-download MiniLibriMix (~580 MB) or run the full setup script.
         if not _has_audio_files(folder):
-            if os.path.normpath(folder) == os.path.normpath("./data/Libri2Mix") and _has_audio_files("./data/MiniLibriMix"):
-                print(f"[Dataset Info] '{folder}' audio files not found. Auto-falling back to existing './data/MiniLibriMix'...")
-                folder = "./data/MiniLibriMix"
-            else:
-                raise RuntimeError(
-                    f"No audio samples found in '{folder}'.\n"
-                    f"Please ensure the dataset folder exists and contains audio files."
+            mini_dir = "./data/MiniLibriMix"
+            if _has_audio_files(mini_dir):
+                print(
+                    f"[Dataset] '{folder}' has no audio files. "
+                    f"Auto-falling back to existing '{mini_dir}'."
                 )
+                folder = mini_dir
+            else:
+                # Nothing found anywhere — ask the user what to do
+                folder = _prompt_dataset_setup(folder)
 
         train_dataset = Libri2MixDataset(
             folder,
@@ -312,7 +476,9 @@ def get_dataloaders(
 
         if len(train_dataset) == 0:
             raise RuntimeError(
-                f"No audio samples found in '{folder}'. Please verify the dataset path or run bash scripts/setup_data.sh."
+                f"No audio samples found in '{folder}'.\n"
+                f"Please verify the dataset path or run:\n"
+                f"  python scripts/setup_data.py --storage_dir ./data"
             )
 
     elif dataset_type == "wav_folder":

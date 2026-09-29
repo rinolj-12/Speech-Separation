@@ -1,6 +1,8 @@
 # 🧠 Spiking Conv-TasNet — Energy-Efficient Speech Separation
 
-> **TL;DR** — A speech separation model that splits a recording of two people talking at the same time into two clean audio streams, using **Spiking Neural Networks (SNNs)** for ultra-low power consumption.
+> **TL;DR** — A speech separation model that splits a recording of two people
+> talking simultaneously into two clean audio streams, using **Spiking Neural
+> Networks (SNNs)** for ultra-low power consumption.
 
 ---
 
@@ -11,9 +13,164 @@
 | Concept | What it does |
 |---|---|
 | **Conv-TasNet** | A state-of-the-art time-domain architecture that separates overlapping speech signals |
-| **Spiking Neural Networks (SNNs)** | Brain-inspired neurons that fire spikes instead of using continuous activations — dramatically reducing energy use |
+| **Spiking Neural Networks (SNNs)** | Brain-inspired neurons that fire discrete spikes instead of continuous values — dramatically reducing energy use |
 
-The result is an end-to-end model that can separate two speakers from a mixed audio recording while being far more energy-efficient than standard deep learning approaches.
+The result is an end-to-end model that can separate two speakers from a mixed
+audio recording while being far more energy-efficient than standard deep learning
+approaches.
+
+---
+
+## ⚡ Quick Start
+
+### Prerequisites
+
+| Tool | Required? | Notes |
+|---|---|---|
+| **Python 3.9+** | ✅ Always | `python --version` to check |
+| **Git** | ✅ Always | For cloning the repo |
+| **SoX** | ⚠️ Full dataset only | Only needed for `scripts/setup_data.py` (Libri2Mix) |
+| **NVIDIA GPU** | ❌ Optional | CPU works; GPU trains ~20–50× faster |
+
+> [!NOTE]
+> **SoX is NOT needed** if you use MiniLibriMix (the recommended first-run
+> option). It is only required for generating the full Libri2Mix dataset.
+
+---
+
+### Step 1 — Clone & Create Environment
+
+```bash
+git clone <your-repo-url>
+cd Speech
+python -m venv .venv
+```
+
+Activate the virtual environment:
+
+| Platform | Command |
+|---|---|
+| **Linux / macOS** | `source .venv/bin/activate` |
+| **Windows CMD** | `.venv\Scripts\activate.bat` |
+| **Windows PowerShell** | `.\venv\Scripts\Activate.ps1` |
+
+---
+
+### Step 2 — Install Dependencies
+
+**🔵 CPU only (any laptop, no GPU needed):**
+```bash
+pip install torch torchvision torchaudio
+pip install -r requirements.txt
+```
+
+**🟢 NVIDIA GPU (CUDA 12.8):**
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+```
+
+> [!TIP]
+> Not sure which CUDA version you have? Run `nvidia-smi` and check the top-right
+> corner. Visit [pytorch.org/get-started](https://pytorch.org/get-started/locally/)
+> to find the right install command for your CUDA version.
+
+---
+
+### Step 3 — Get the Dataset
+
+**Which dataset should I use?**
+
+```
+Are you on a laptop / CPU only, or just want a quick test?
+  → Use MiniLibriMix  (~580 MB, auto-downloaded, no SoX needed)
+
+Do you want to train seriously with full data (~13,900 pairs)?
+  → Use Libri2Mix train-100  (~6.3–23 GB, requires SoX)
+```
+
+#### Option A — MiniLibriMix (recommended for first run)
+
+Just run `train.py` — on first launch it detects no dataset and asks:
+
+```
+  [1] Download MiniLibriMix (~580 MB, ~1 000 pairs, no SoX needed)   ← press Enter
+  [2] Generate full Libri2Mix train-100 via setup script
+  [3] Abort
+```
+
+Choose **1** and it downloads + extracts everything automatically.
+
+#### Option B — Full Libri2Mix train-100
+
+Requires **SoX** installed first:
+
+| OS | Install command |
+|---|---|
+| Ubuntu / Debian | `sudo apt-get install -y sox libsox-fmt-all` |
+| macOS | `brew install sox` |
+| Windows | `winget install -e --id SoX.SoX` |
+
+Then run the setup script (interactive — it asks clean or noisy):
+
+```bash
+python scripts/setup_data.py
+```
+
+```
+  [1] Clean only  (mix_clean)              ~6.3 GB    ← no noise, faster
+  [2] Clean + Noisy  (mix_clean & mix_both)  ~23 GB   ← adds 17 GB WHAM! noise
+```
+
+Or skip the prompt with flags:
+```bash
+python scripts/setup_data.py --clean_only    # ~6.3 GB,  generates mix_clean
+python scripts/setup_data.py --with_noise    # ~23 GB,   generates mix_clean + mix_both
+```
+
+---
+
+### Step 4 — Train
+
+**🔵 CPU only (MiniLibriMix — will auto-download on first run):**
+```bash
+python train.py --device cpu --no_amp --batch_size 2
+```
+
+**🟢 GPU — MiniLibriMix (quick test, auto-downloaded):**
+```bash
+python train.py --device cuda --dataset_type mini_librimix --data_dir ./data/MiniLibriMix
+```
+
+**🟢 GPU — Full Libri2Mix (after running setup_data.py):**
+```bash
+# Clean mixtures only:
+python train.py --device cuda --mixture_type mix_clean --data_dir ./data/Libri2Mix
+
+# Clean + noisy (default, requires --with_noise setup):
+python train.py --device cuda --mixture_type mix_both --data_dir ./data/Libri2Mix
+```
+
+> [!TIP]
+> Training was designed for a GPU. On CPU expect ~10–50× slower speed.
+> Use `--batch_size 2 --no_amp` on CPU to reduce memory usage.
+>
+> If `./data/Libri2Mix` is missing, training automatically falls back to
+> `./data/MiniLibriMix` if it exists — so you can run immediately after install.
+
+---
+
+## 📊 Dataset Details
+
+| Property | MiniLibriMix | Libri2Mix train-100 |
+|---|---|---|
+| Training pairs | ~1,000 | ~13,900 |
+| Audio duration | ~3.5 hours | ~58 hours |
+| Download size | ~580 MB | ~6.3 GB (clean) / ~23 GB (with noise) |
+| Requires SoX | ❌ No | ✅ Yes |
+| Best for | First run, CPU, quick iteration | Benchmark results, serious training |
+| Sample rate | 8 kHz | 8 kHz |
+| Segment length | 2.0 s (16,000 samples) | 2.0 s (16,000 samples) |
 
 ---
 
@@ -67,7 +224,6 @@ Output: ŝ₁(t), ŝ₂(t)  [Batch, 2, Time]
 Speech/
 ├── train.py              # Main training script
 ├── test_model.py         # Evaluation & encoder comparison
-├── test_pipeline.py      # Automated unit tests & shape checks
 │
 ├── model.py              # SpikingConvTasNet — top-level model
 ├── encoder.py            # Learned 1-D Conv & STFT encoders
@@ -77,114 +233,26 @@ Speech/
 ├── spike_encoder.py      # Spike encoding schemes (Bit-Plane, Population, …)
 │
 ├── losses.py             # SI-SDR uPIT loss + Multi-Resolution STFT loss
-├── dataset.py            # Libri2Mix & MiniLibriMix data loaders
+├── dataset.py            # Data loaders + MiniLibriMix auto-downloader
 ├── config.py             # ModelConfig & TrainConfig dataclasses
-├── compat.py             # PyTorch AMP / GradScaler compatibility
 │
 ├── visualize.py          # Waveform, spectrogram, mask & spike-raster plots
-├── verify_cuda.py        # CUDA diagnostic & benchmark
 │
 ├── scripts/
-│   └── setup_data.py     # Cross-platform Libri2Mix train-100 generator
+│   └── setup_data.py     # Libri2Mix train-100 generator (interactive)
 │
 ├── checkpoints/          # Saved model weights (.pt files)
 ├── test_outputs/         # Audio & visualization outputs (auto-generated)
-├── requirements.txt      # Python dependencies
+├── requirements.txt      # Python dependencies (PyTorch installed separately)
 └── .gitattributes        # CRLF/LF line-ending rules
 ```
 
 ---
 
-## ⚡ Quick Start
-
-### Step 1 — Clone & Create Environment
-
-```bash
-git clone <your-repo-url>
-cd Speech
-python -m venv .venv
-```
-
-Activate the virtual environment:
-
-| Platform | Command |
-|---|---|
-| Linux / macOS | `source .venv/bin/activate` |
-| Windows CMD | `.venv\Scripts\activate.bat` |
-| Windows PowerShell | `.\venv\Scripts\Activate.ps1` |
-
-### Step 2 — Install PyTorch
-
-**🟢 With NVIDIA GPU (CUDA 12.8):**
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements.txt
-```
-
-**🔵 CPU only (no GPU):**
-```bash
-pip install torch torchvision torchaudio
-pip install -r requirements.txt
-```
-
-### Step 3 — Get the Dataset
-
-| Dataset | Size | How to get it |
-|---|---|---|
-| **MiniLibriMix** *(recommended for first run)* | ~580 MB | **Auto-downloaded** — just run `train.py --dataset_type mini_librimix` |
-| **Libri2Mix train-100** *(full GPU training)* | ~15–20 GB | Run `python scripts/setup_data.py --storage_dir ./data` once (requires SoX) |
-
-> [!IMPORTANT]
-> **MiniLibriMix** is fetched automatically from Zenodo the first time you train. No manual download needed.
->
-> **Libri2Mix train-100** requires SoX audio tools. Use the setup script:
-> ```bash
-> python scripts/setup_data.py --storage_dir ./data
-> ```
-
-### Step 4 — Train
-
-**🟢 GPU (CUDA) — recommended:**
-```bash
-# Standard 1-D Conv encoder on full Libri2Mix
-python train.py --device cuda --encoder_type standard
-
-# STFT Spectrogram encoder variant
-python train.py --device cuda --encoder_type spectrogram --mr_stft_weight 0.0
-
-# Quick test with MiniLibriMix (~580 MB, auto-downloaded)
-python train.py --device cuda --dataset_type mini_librimix --data_dir ./data/MiniLibriMix
-```
-
-**🔵 CPU only:**
-```bash
-python train.py --device cpu --dataset_type mini_librimix \
-    --data_dir ./data/MiniLibriMix --batch_size 2 --no_amp --no_checkpointing
-```
-
-> [!TIP]
-> If `./data/Libri2Mix` is missing, training automatically falls back to `./data/MiniLibriMix` — so you can run immediately after install.
-
----
-
-## 📊 Dataset Details
-
-The project targets **Libri2Mix `train-100`** — the standard academic speech separation benchmark.
-
-| Property | Value |
-|---|---|
-| Sample rate | 8 kHz |
-| Segment length | 2.0 s (16,000 samples) |
-| Mixture type | `mix_both` — 2 overlapping speakers + background noise |
-| Training pairs | ~13,900 (~58 hours) |
-| Validation pairs | ~3,000 (~11 hours) |
-
----
-
 ## 🚀 Training Reference
 
-<details open>
-<summary><b>All Training Parameters for <code>train.py</code></b></summary>
+<details>
+<summary><b>All training flags for <code>train.py</code> — click to expand</b></summary>
 
 ### Model Architecture
 
@@ -229,13 +297,13 @@ The project targets **Libri2Mix `train-100`** — the standard academic speech s
 
 | Flag | Default | Description |
 |---|---|---|
-| `--device` | `cuda` | `auto`, `cuda`, `cuda:0`, or `cpu` |
-| `--amp` | `True` | FP16 Automatic Mixed Precision (`--no_amp` to disable) |
-| `--checkpointing` | `True` | Gradient checkpointing (~80% VRAM savings; `--no_checkpointing` to disable) |
+| `--device` | auto | `auto`, `cuda`, `cuda:0`, or `cpu` |
+| `--amp` | `True` | FP16 Automatic Mixed Precision (`--no_amp` to disable on CPU) |
+| `--checkpointing` | `True` | Gradient checkpointing (~80% VRAM savings) |
 | `--multi_gpu` | `False` | `DataParallel` across multiple GPUs (experimental) |
-| `--num_workers` | `0` | DataLoader workers (`0` = single process, avoids IPC/OOM issues) |
+| `--num_workers` | `0` | DataLoader workers (`0` = safe default) |
 | `--pin_memory` | auto | Async host→device memory pinning (auto-enabled on CUDA) |
-| `--num_threads` | `6` | CPU threads used when running on CPU |
+| `--num_threads` | `6` | CPU threads used in CPU-only mode |
 | `--max_train_batches` | `None` | Limit train batches per epoch (debugging) |
 | `--max_val_batches` | `None` | Limit validation batches |
 
@@ -244,8 +312,9 @@ The project targets **Libri2Mix `train-100`** — the standard academic speech s
 | Flag | Default | Description |
 |---|---|---|
 | `--dataset_type` | `librimix` | `librimix`, `mini_librimix`, or `wav_folder` |
-| `--data_dir` | `./data/Libri2Mix` | Dataset root (auto-fallback to `./data/MiniLibriMix`) |
+| `--data_dir` | `./data/Libri2Mix` | Dataset root (auto-prompts download if missing) |
 | `--checkpoint_dir` | `./checkpoints` | Where to save best model weights |
+| `--resume` | — | Resume from checkpoint: `--resume auto` or `--resume path/to/ckpt.pt` |
 
 ### Required Files
 
@@ -257,8 +326,8 @@ The project targets **Libri2Mix `train-100`** — the standard academic speech s
 | [`snn.py`](file:///home/rinolj/Music/Speech/snn.py) + [`spike_encoder.py`](file:///home/rinolj/Music/Speech/spike_encoder.py) | SNN neuron dynamics & spike encoding |
 | [`separator.py`](file:///home/rinolj/Music/Speech/separator.py) | Spiking TCN mask estimator |
 | [`losses.py`](file:///home/rinolj/Music/Speech/losses.py) | uPIT + SI-SDR + MR-STFT losses |
-| [`dataset.py`](file:///home/rinolj/Music/Speech/dataset.py) | Data loaders for Libri2Mix / MiniLibriMix |
-| `data/Libri2Mix/` or `data/MiniLibriMix/` | Audio data (configured via `--data_dir`) |
+| [`dataset.py`](file:///home/rinolj/Music/Speech/dataset.py) | Data loaders for Libri2Mix / MiniLibriMix + auto-downloader |
+| `data/Libri2Mix/` or `data/MiniLibriMix/` | Audio data (auto-downloaded on first run, or via `scripts/setup_data.py`) |
 
 </details>
 
@@ -266,66 +335,43 @@ The project targets **Libri2Mix `train-100`** — the standard academic speech s
 
 ## 🧪 Testing & Evaluation
 
-### Unit Tests (no GPU required)
-
-```bash
-# Linux / macOS
-source .venv/bin/activate
-python3 test_pipeline.py
-
-# Windows
-.\.venv\Scripts\Activate.ps1
-python test_pipeline.py
-```
-
-### Compare Both Encoders (requires checkpoints)
-
-```bash
-# Linux / macOS
-python3 test_model.py --compare_encoders --device cpu
-
-# Windows
-python test_model.py --compare_encoders --device cpu
-```
-
 ### Evaluate a Single Checkpoint
 
 ```bash
-python3 test_model.py --device cpu --snn_checkpoint checkpoints/best_snn_standard_plif.pt
+python test_model.py --device cpu --snn_checkpoint checkpoints/best_snn_standard_plif.pt
+```
+
+### Compare Both Encoders Side-by-Side
+
+```bash
+python test_model.py --compare_encoders --device cpu
 ```
 
 ---
 
 ## 📂 Test Outputs (`test_outputs/`)
 
-Running `test_model.py` generates the following files, organized by encoder and category:
+Running `test_model.py` generates files organized by encoder:
 
 ```
 test_outputs/
 ├── standard_encoder/
-│   ├── audio/
-│   │   ├── mixture.wav
-│   │   ├── target_speaker1.wav, target_speaker2.wav
-│   │   └── separated_speaker1.wav, separated_speaker2.wav
-│   ├── waveforms/
-│   │   └── waveform_*.png          # Waveform overlays & comparisons
-│   ├── spectrograms/
-│   │   └── spectrogram_*.png       # Per-speaker spectrogram views
-│   ├── masks/
-│   │   └── mask_*.png              # Estimated masks & distributions
-│   └── snn/
-│       └── snn_*.png               # Spike rasters & firing rate charts
+│   ├── audio/              mixture.wav, target_speaker1/2.wav, separated_speaker1/2.wav
+│   ├── waveforms/          waveform_*.png
+│   ├── spectrograms/       spectrogram_*.png
+│   ├── masks/              mask_*.png
+│   └── snn/                snn_*.png  (spike rasters & firing rate charts)
 ├── spectrogram/
-│   └── (same structure as above)
+│   └── (same structure)
 └── comparisons/
-    └── comparison_*.png            # Cross-encoder SI-SDR, latency & waveform charts
+    └── comparison_*.png    (cross-encoder SI-SDR, latency & waveform charts)
 ```
 
 ---
 
 ## 📐 Model Size
 
-| Encoder | Trainable Parameters |
-|---|---|
-| `standard` (64ch, B=64, H=128, R=2) | ~332,160 |
-| `spectrogram` (129 STFT bins → 64ch) | ~345,472 |
+| Encoder | Config | Trainable Parameters |
+|---|---|---|
+| `standard` | N=64, B=128, H=256, R=2 | ~1.6 M |
+| `spectrogram` | N=64 (proj from 129 bins), B=128, H=256, R=2 | ~1.6 M |
