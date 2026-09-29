@@ -14,10 +14,8 @@ ENV/
 .venv/
 venv311/
 
-# Large Datasets, Checkpoints & Outputs
+# Large Datasets & Temp Distributions
 data/
-checkpoints/
-test_outputs/
 .dist/
 
 # Jupyter Notebook checkpoints
